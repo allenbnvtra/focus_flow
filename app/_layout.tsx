@@ -16,9 +16,7 @@ export default function RootLayout() {
     }
   }, [fontsLoaded]);
 
-  if (!fontsLoaded) {
-    return null;
-  }
+  if (!fontsLoaded) return null;
 
   return (
     <AuthProvider>
@@ -29,11 +27,7 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: '#FFFFFF' },
           animation: 'fade',
         }}
-      >
-        <Stack.Screen name="index" />
-        <Stack.Screen name="auth" />
-        <Stack.Screen name="(tabs)" />
-      </Stack>
+      />
     </AuthProvider>
   );
 }
