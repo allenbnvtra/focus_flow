@@ -9,7 +9,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 const CompleteScreen = () => {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { signup, isLoading } = useAuth();
+  const { signup, updateUserProfile, isLoading } = useAuth();
   
   const [isPressed, setIsPressed] = useState(false);
   const [scaleAnim] = useState(new Animated.Value(1));
@@ -45,31 +45,29 @@ const CompleteScreen = () => {
       // Parse goals if it's a JSON string
       const parsedGoals = typeof goals === 'string' ? JSON.parse(goals) : goals;
       
-      // Call signup with just the 3 required parameters
+      // Step 1: Create account with Supabase Auth
+      console.log('📝 Creating user account...');
       await signup(email, password, name);
 
-      // Store onboarding data in AsyncStorage or your preferred storage
-      // You can retrieve this later in your dashboard or settings
-      // await AsyncStorage.setItem('onboardingData', JSON.stringify({
-      //   userType,
-      //   goals: parsedGoals,
-      //   frequency,
-      // }));
-
-      // OR if you have a separate API endpoint to update user profile:
-      // await updateUserProfile({ userType, goals: parsedGoals, frequency });
-
-      console.log('Onboarding data:', {
-        userType,
+      // Step 2: Update user profile with onboarding data
+      console.log('📝 Updating user profile with onboarding data...');
+      await updateUserProfile({
+        user_type: userType as 'individual' | 'parent' | 'guest',
         goals: parsedGoals,
-        frequency,
+        check_in_frequency: frequency,
       });
+
+      console.log('✅ Signup completed successfully!');
 
       // Navigate to dashboard
       router.replace('/dashboard');
-    } catch (error) {
-      console.error('Signup error:', error);
-      Alert.alert('Error', 'Failed to complete signup. Please try again.');
+    } catch (error: any) {
+      console.error('❌ Signup error:', error);
+      Alert.alert(
+        'Signup Failed', 
+        error.message || 'Failed to complete signup. Please try again.',
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -103,7 +101,7 @@ const CompleteScreen = () => {
             >
               <View style={[styles.holdButtonInner, isPressed && styles.holdButtonInnerPressed]}>
                 <Text style={styles.holdButtonText}>
-                  {isLoading ? 'Setting up...' : `Hold here to${'\n'}continue`}
+                  {isLoading ? 'Creating account...' : `Hold here to${'\n'}continue`}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -202,23 +200,10 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     lineHeight: 20,
   },
-  // Decorative circles
   circle: {
     position: 'absolute',
     backgroundColor: 'rgba(197, 220, 220, 0.3)',
     borderRadius: 1000,
-  },
-  circleTopLeft: {
-    width: 250,
-    height: 250,
-    top: -80,
-    left: -100,
-  },
-  circleTopRight: {
-    width: 200,
-    height: 200,
-    top: 80,
-    right: -80,
   },
   circleBottomLeft: {
     width: 280,
