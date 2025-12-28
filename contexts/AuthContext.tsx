@@ -9,6 +9,7 @@ interface User {
   email: string;
   name: string;
   role?: string;
+  is_admin?: boolean;
   user_type?: 'individual' | 'parent' | 'guest';
   goals?: string[];
   check_in_frequency?: string;
@@ -88,6 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         name: data.name,
         role: 'user',
         user_type: data.user_type,
+        is_admin: data.is_admin || false,
         goals: data.goals,
         check_in_frequency: data.check_in_frequency,
         created_at: data.created_at,
