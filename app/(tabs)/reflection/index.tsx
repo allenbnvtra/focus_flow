@@ -282,13 +282,6 @@ export default function Reflection() {
               )}
               <TouchableOpacity style={styles.iconButton}>
                 <Ionicons
-                  name="moon-outline"
-                  size={22}
-                  color={Colors.primary}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconButton}>
-                <Ionicons
                   name="menu-outline"
                   size={22}
                   color={Colors.primary}
@@ -304,7 +297,7 @@ export default function Reflection() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.titleSection}>
-            <Text style={styles.pageTitle}>Knowledge Quiz</Text>
+            <Text style={styles.pageTitle}>Reflection and Journal Space</Text>
             <Text style={styles.pageSubtitle}>Test your understanding</Text>
           </View>
 

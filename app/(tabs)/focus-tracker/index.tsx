@@ -84,6 +84,13 @@ export default function FocusTracker() {
   const [showTaskSelectModal, setShowTaskSelectModal] = useState(false);
   const [showModeSelectModal, setShowModeSelectModal] = useState(false);
 
+  // Task action menu
+  const [selectedTaskForAction, setSelectedTaskForAction] = useState<string | null>(null);
+  const [showActionMenu, setShowActionMenu] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editTaskText, setEditTaskText] = useState("");
+
   const moods = [
     { emoji: "😊", label: "Great", value: 1 },
     { emoji: "🙂", label: "Good", value: 2 },
@@ -731,6 +738,38 @@ export default function FocusTracker() {
     }
   };
 
+  // Edit task
+  const handleEditTask = async () => {
+    if (!editTaskText.trim() || !editingTask) {
+      Alert.alert("Error", "Please enter a task");
+      return;
+    }
+
+    try {
+      setAddingTask(true);
+
+      const { data, error } = await supabase
+        .from("tasks")
+        .update({ text: editTaskText.trim() })
+        .eq("id", editingTask.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setTasks(tasks.map((t) => (t.id === editingTask.id ? data : t)));
+      setShowEditModal(false);
+      setEditTaskText("");
+      setEditingTask(null);
+      Alert.alert("Success", "Task updated successfully!");
+    } catch (error: any) {
+      console.error("Error updating task:", error);
+      Alert.alert("Error", "Failed to update task");
+    } finally {
+      setAddingTask(false);
+    }
+  };
+
   // Delete task
   const handleDeleteTask = async (taskId: string) => {
     Alert.alert(
@@ -1017,7 +1056,12 @@ export default function FocusTracker() {
                       styles.taskCardActive,
                   ]}
                   onPress={() => toggleTask(task.id)}
+                  onLongPress={() => {
+                    setSelectedTaskForAction(task.id);
+                    setShowActionMenu(true);
+                  }}
                   activeOpacity={0.7}
+                  delayLongPress={500}
                 >
                   <View
                     style={[
@@ -1062,13 +1106,6 @@ export default function FocusTracker() {
                       )}
                     </View>
                   </View>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.deleteBtn}
-                  onPress={() => handleDeleteTask(task.id)}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Ionicons name="trash-outline" size={20} color="#FF6B6B" />
                 </TouchableOpacity>
               </View>
             ))
@@ -1356,6 +1393,166 @@ export default function FocusTracker() {
                     style={styles.saveBtnGradient}
                   >
                     <Text style={styles.saveBtnText}>Apply</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
+        </Modal>
+
+        {/* ACTION MENU MODAL */}
+        <Modal
+          visible={showActionMenu}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setShowActionMenu(false);
+            setSelectedTaskForAction(null);
+          }}
+        >
+          <TouchableOpacity
+            style={styles.actionMenuOverlay}
+            activeOpacity={1}
+            onPress={() => {
+              setShowActionMenu(false);
+              setSelectedTaskForAction(null);
+            }}
+          >
+            <View style={styles.actionMenuContent}>
+              <View style={styles.actionMenuHeader}>
+                <Text style={styles.actionMenuTitle}>Task Actions</Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.actionMenuItem}
+                onPress={() => {
+                  const task = tasks.find((t) => t.id === selectedTaskForAction);
+                  if (task) {
+                    setEditingTask(task);
+                    setEditTaskText(task.text);
+                    setShowActionMenu(false);
+                    setShowEditModal(true);
+                  }
+                }}
+              >
+                <View style={styles.actionMenuIcon}>
+                  <Ionicons name="create-outline" size={24} color={Colors.primary} />
+                </View>
+                <View style={styles.actionMenuInfo}>
+                  <Text style={styles.actionMenuItemTitle}>Edit Task</Text>
+                  <Text style={styles.actionMenuItemDesc}>
+                    Modify task description
+                  </Text>
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={Colors.textLight}
+                />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionMenuItem}
+                onPress={() => {
+                  setShowActionMenu(false);
+                  if (selectedTaskForAction) {
+                    handleDeleteTask(selectedTaskForAction);
+                  }
+                }}
+              >
+                <View style={[styles.actionMenuIcon, styles.actionMenuIconDanger]}>
+                  <Ionicons name="trash-outline" size={24} color="#FF6B6B" />
+                </View>
+                <View style={styles.actionMenuInfo}>
+                  <Text style={[styles.actionMenuItemTitle, styles.dangerText]}>
+                    Delete Task
+                  </Text>
+                  <Text style={styles.actionMenuItemDesc}>
+                    Remove task permanently
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#FF6B6B" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionMenuCancelBtn}
+                onPress={() => {
+                  setShowActionMenu(false);
+                  setSelectedTaskForAction(null);
+                }}
+              >
+                <Text style={styles.actionMenuCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* EDIT TASK MODAL */}
+        <Modal
+          visible={showEditModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => {
+            setShowEditModal(false);
+            setEditTaskText("");
+            setEditingTask(null);
+          }}
+        >
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              style={styles.addTaskModalContent}
+            >
+              <View style={styles.addTaskHeader}>
+                <Text style={styles.modalTitle}>Edit Goal</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowEditModal(false);
+                    setEditTaskText("");
+                    setEditingTask(null);
+                  }}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Ionicons name="close" size={28} color={Colors.textMedium} />
+                </TouchableOpacity>
+              </View>
+
+              <TextInput
+                style={styles.taskInput}
+                placeholder="What do you want to accomplish?"
+                placeholderTextColor={Colors.textLight}
+                value={editTaskText}
+                onChangeText={setEditTaskText}
+                multiline
+                maxLength={200}
+                autoFocus
+              />
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={styles.cancelBtn}
+                  onPress={() => {
+                    setShowEditModal(false);
+                    setEditTaskText("");
+                    setEditingTask(null);
+                  }}
+                >
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveBtn, addingTask && styles.buttonDisabled]}
+                  onPress={handleEditTask}
+                  disabled={addingTask}
+                >
+                  <LinearGradient
+                    colors={[Colors.primary, Colors.primaryLight]}
+                    style={styles.saveBtnGradient}
+                  >
+                    {addingTask ? (
+                      <ActivityIndicator size="small" color="white" />
+                    ) : (
+                      <Text style={styles.saveBtnText}>Save Changes</Text>
+                    )}
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
@@ -1932,5 +2129,76 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.7,
+  },
+  actionMenuOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+    padding: 20,
+  },
+  actionMenuContent: {
+    backgroundColor: "white",
+    borderRadius: 24,
+    padding: 20,
+    gap: 10,
+  },
+  actionMenuHeader: {
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.background,
+    marginBottom: 5,
+  },
+  actionMenuTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: Colors.textDark,
+    textAlign: "center",
+  },
+  actionMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    backgroundColor: Colors.background,
+    borderRadius: 16,
+    gap: 12,
+  },
+  actionMenuIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(79, 195, 247, 0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionMenuIconDanger: {
+    backgroundColor: "rgba(255, 107, 107, 0.1)",
+  },
+  actionMenuInfo: {
+    flex: 1,
+  },
+  actionMenuItemTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: Colors.textDark,
+    marginBottom: 2,
+  },
+  actionMenuItemDesc: {
+    fontSize: 13,
+    color: Colors.textLight,
+  },
+  dangerText: {
+    color: "#FF6B6B",
+  },
+  actionMenuCancelBtn: {
+    marginTop: 10,
+    padding: 16,
+    alignItems: "center",
+    backgroundColor: Colors.background,
+    borderRadius: 16,
+  },
+  actionMenuCancelText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: Colors.textMedium,
   },
 });
