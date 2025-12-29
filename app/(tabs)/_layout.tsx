@@ -1,4 +1,4 @@
-import { Tabs } from 'expo-router';
+import { Tabs, usePathname } from 'expo-router';
 import React from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,13 +27,18 @@ const TabBarIcon = ({ name, focused }: { name: IconName; focused: boolean }) => 
 };
 
 export default function TabsLayout() {
+  const pathname = usePathname();
+  
+  // Hide tab bar when in memory game
+  const shouldHideTabBar = pathname.includes('games/memory');
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
         tabBarLabelPosition: 'beside-icon',
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: shouldHideTabBar ? { display: 'none' } : styles.tabBar,
         tabBarItemStyle: styles.tabItem,
         tabBarIconStyle: styles.tabIconStyle,
       }}
@@ -100,7 +105,7 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     borderWidth: 1,
     borderColor: Colors.border,
-    paddingBottom: 0, 
+    paddingBottom: 0,
   },
   tabItem: {
     height: 64, 

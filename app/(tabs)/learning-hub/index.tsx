@@ -10,6 +10,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Background from '../../../components/Background';
+import { useRouter } from 'expo-router';
 
 const Colors = {
   primary: '#4A9B7F',
@@ -28,6 +29,9 @@ const Colors = {
   textLight: '#5A7770',
   white: '#FFFFFF',
   lightGray: '#E8E8E8',
+  purple: '#A855F7',
+  purpleLight: '#C084FC',
+  purpleDark: '#7C3AED',
 };
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -37,41 +41,64 @@ interface LearningItem {
   icon: IconName;
   title: string;
   description: string;
+  route?: string;
+  colors: readonly [string, string, string];
 }
 
 export default function LearningHub() {
+  const router = useRouter();
+
   const learningItems: LearningItem[] = [
     {
       id: 1,
-      icon: 'book-outline',
-      title: 'Quick Reads',
-      description: 'Short science-based reads to help you understand your focus and emotions.',
+      icon: 'game-controller-outline',
+      title: 'Memory Game',
+      description: 'Train your focus and memory with this fun Simon Says game. Test your concentration!',
+      route: 'learning-hub/games/memory',
+      colors: [Colors.purpleDark, Colors.purple, Colors.purpleLight] as const,
     },
     {
       id: 2,
-      icon: 'play-circle-outline',
-      title: 'Watch and Learn',
-      description: 'Simple, visual lessons that show how to stay calm and focused every day.',
+      icon: 'book-outline',
+      title: 'Quick Reads',
+      description: 'Short science-based reads to help you understand your focus and emotions.',
+      colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
     },
     {
       id: 3,
-      icon: 'extension-puzzle-outline',
-      title: 'Visual Tips',
-      description: 'Colorful guides and emotion concepts that are easy to remember.',
+      icon: 'play-circle-outline',
+      title: 'Watch and Learn',
+      description: 'Simple, visual lessons that show how to stay calm and focused every day.',
+      colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
     },
     {
       id: 4,
-      icon: 'bulb-outline',
-      title: 'Test What You Know',
-      description: "Quizzes to see how much you've learned — no pressure, just fun discovery!",
+      icon: 'extension-puzzle-outline',
+      title: 'Visual Tips',
+      description: 'Colorful guides and emotion concepts that are easy to remember.',
+      colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
     },
     {
       id: 5,
+      icon: 'bulb-outline',
+      title: 'Test What You Know',
+      description: "Quizzes to see how much you've learned — no pressure, just fun discovery!",
+      colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
+    },
+    {
+      id: 6,
       icon: 'volume-high-outline',
       title: 'Listen Mode',
       description: 'Learn on the go with guided audio about attention and mindfulness.',
+      colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
     },
   ];
+
+  const handleCardPress = (item: LearningItem) => {
+    if (item.route) {
+      router.push(item.route);
+    }
+  };
 
   return (
     <Background>
@@ -117,9 +144,10 @@ export default function LearningHub() {
               <TouchableOpacity
                 key={item.id}
                 activeOpacity={0.8}
+                onPress={() => handleCardPress(item)}
               >
                 <LinearGradient
-                  colors={[Colors.cardDark1, Colors.cardDark2, Colors.cardDark3]}
+                  colors={item.colors}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   locations={[0, 0.5, 1]}
@@ -134,6 +162,11 @@ export default function LearningHub() {
                     <Text style={styles.cardTitle}>{item.title}</Text>
                     <Text style={styles.cardDescription}>{item.description}</Text>
                   </View>
+                  {item.route && (
+                    <View style={styles.arrowContainer}>
+                      <Ionicons name="chevron-forward" size={24} color={Colors.white} />
+                    </View>
+                  )}
                 </LinearGradient>
               </TouchableOpacity>
             ))}
@@ -270,5 +303,8 @@ const styles = StyleSheet.create({
     color: Colors.white,
     lineHeight: 20,
     fontWeight: '400',
+  },
+  arrowContainer: {
+    marginLeft: 8,
   },
 });
