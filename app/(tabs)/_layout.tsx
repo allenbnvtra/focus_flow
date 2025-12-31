@@ -30,7 +30,7 @@ export default function TabsLayout() {
   const pathname = usePathname();
   
   // Hide tab bar when in memory game
-  const shouldHideTabBar = pathname.includes('games/memory');
+  const shouldHideTabBar = pathname.includes('games/memory') || pathname.includes('settings/edit-profile') || pathname.includes('dashboard/insight');
 
   return (
     <Tabs

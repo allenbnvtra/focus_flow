@@ -8,10 +8,10 @@ import {
   Dimensions,
   Platform,
   ScrollView,
+  Vibration,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
 import { router } from 'expo-router';
 
 const { width } = Dimensions.get('window');
@@ -44,7 +44,7 @@ export default function MemoryGame() {
   const [level, setLevel] = useState(1);
   const [gameOver, setGameOver] = useState(false);
   const [highScore, setHighScore] = useState(0);
-  const [soundOn, setSoundOn] = useState(true);
+  const [vibrationOn, setVibrationOn] = useState(true);
   const [gameStarted, setGameStarted] = useState(false);
   const [showQuitScore, setShowQuitScore] = useState(false);
   const [quitScore, setQuitScore] = useState(0);
@@ -57,31 +57,22 @@ export default function MemoryGame() {
     yellow: new Animated.Value(1),
   }).current;
 
-  // Sound frequencies for each color
-  const playSound = async (color: GameColor) => {
-    if (!soundOn) return;
+  // Vibration patterns for different colors (in milliseconds)
+  const vibrate = (color: GameColor) => {
+    if (!vibrationOn) return;
 
-    const frequencies = {
-      red: 329.63,
-      blue: 261.63,
-      green: 392.0,
-      yellow: 440.0,
+    const patterns = {
+      red: [0, 100],      // Long vibration
+      blue: [0, 50],      // Short vibration
+      green: [0, 30],     // Very short vibration
+      yellow: [0, 70],    // Medium vibration
     };
 
     try {
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: `data:audio/wav;base64,${generateBeep(frequencies[color])}` },
-        { shouldPlay: true }
-      );
-      setTimeout(() => sound.unloadAsync(), 300);
+      Vibration.vibrate(patterns[color]);
     } catch (error) {
-      console.log('Sound error:', error);
+      console.log('Vibration error:', error);
     }
-  };
-
-  // Simple beep generator (base64 encoded silence - you can replace with actual sound files)
-  const generateBeep = (frequency: number) => {
-    return 'UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
   };
 
   const animateButton = (color: GameColor, active: boolean) => {
@@ -120,7 +111,7 @@ export default function MemoryGame() {
       await new Promise((resolve) => setTimeout(resolve, speed));
       setActiveColor(seq[i]);
       animateButton(seq[i], true);
-      playSound(seq[i]);
+      vibrate(seq[i]);
       await new Promise((resolve) => setTimeout(resolve, speed));
       setActiveColor(null);
       animateButton(seq[i], false);
@@ -137,7 +128,7 @@ export default function MemoryGame() {
     setPlayerSequence(newPlayerSequence);
     setActiveColor(color);
     animateButton(color, true);
-    playSound(color);
+    vibrate(color);
 
     setTimeout(() => {
       setActiveColor(null);
@@ -149,6 +140,10 @@ export default function MemoryGame() {
     if (newPlayerSequence[currentIndex] !== sequence[currentIndex]) {
       setGameOver(true);
       setIsPlayerTurn(false);
+      // Game over vibration
+      if (vibrationOn) {
+        Vibration.vibrate([0, 100, 100, 100]);
+      }
       if (level > highScore) {
         setHighScore(level);
       }
@@ -158,6 +153,10 @@ export default function MemoryGame() {
     if (newPlayerSequence.length === sequence.length) {
       setPlayerSequence([]);
       setLevel(level + 1);
+      // Success vibration
+      if (vibrationOn) {
+        Vibration.vibrate([0, 50, 50, 50]);
+      }
       setTimeout(() => nextLevel(sequence), 1000);
     }
   };
@@ -201,13 +200,6 @@ export default function MemoryGame() {
     }
   };
 
-  useEffect(() => {
-    Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-    });
-  }, []);
-
   return (
     <LinearGradient colors={Colors.background} style={styles.container}>
       <ScrollView 
@@ -246,10 +238,10 @@ export default function MemoryGame() {
             </View>
             <TouchableOpacity
               style={styles.soundButton}
-              onPress={() => setSoundOn(!soundOn)}
+              onPress={() => setVibrationOn(!vibrationOn)}
             >
               <Ionicons
-                name={soundOn ? 'volume-high' : 'volume-mute'}
+                name={vibrationOn ? 'phone-portrait' : 'phone-portrait-outline'}
                 size={24}
                 color={Colors.textPrimary}
               />
@@ -267,7 +259,7 @@ export default function MemoryGame() {
 
           {/* Game Board */}
           <View style={styles.gameBoard}>
-            {colors.map((color, index) => (
+            {colors.map((color) => (
               <Animated.View
                 key={color}
                 style={[

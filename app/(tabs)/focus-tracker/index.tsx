@@ -130,10 +130,19 @@ export default function FocusTracker() {
   const fetchTasks = async () => {
     try {
       setLoading(true);
+      
+      const today = new Date();
+      const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+      
+      console.log("Fetching tasks from:", startOfDay.toISOString(), "to:", endOfDay.toISOString());
+      
       const { data, error } = await supabase
         .from("tasks")
         .select("*")
         .eq("user_id", user?.id)
+        .gte("created_at", startOfDay.toISOString())
+        .lt("created_at", endOfDay.toISOString())
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -141,6 +150,7 @@ export default function FocusTracker() {
         throw error;
       }
 
+      console.log("Fetched today's tasks:", data?.length || 0);
       setTasks(data || []);
     } catch (error: any) {
       console.error("Error fetching tasks:", error.message);

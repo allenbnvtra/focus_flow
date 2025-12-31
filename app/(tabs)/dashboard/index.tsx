@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,11 +9,14 @@ import {
   Platform,
   StyleProp,
   ViewStyle,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, Redirect } from 'expo-router';
 import { useAuth } from '../../../contexts/AuthContext';
+import { supabase } from '../../../lib/supabase';
 import Background from '../../../components/Background';
 
 const { width } = Dimensions.get('window');
@@ -42,6 +45,38 @@ interface DashboardCardProps {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   gradientType?: 'dark' | 'light' | 'white';
+}
+
+interface Task {
+  id: string;
+  text: string;
+  completed: boolean;
+  focus_time: number;
+  completion_count: number;
+}
+
+interface FocusSession {
+  id: string;
+  duration_minutes: number;
+  started_at: string;
+  completed_at: string;
+}
+
+interface DailyMood {
+  mood_value: number;
+  mood_date: string;
+  notes: string | null;
+}
+
+interface DashboardStats {
+  totalTasks: number;
+  completedTasks: number;
+  incompleteTasks: number;
+  totalFocusTime: number;
+  todayFocusSessions: number;
+  currentStreak: number;
+  recentMoods: DailyMood[];
+  topTask: Task | null;
 }
 
 const DashboardCard: React.FC<DashboardCardProps> = ({ children, style, gradientType = 'white' }) => {
@@ -83,6 +118,127 @@ export default function Dashboard() {
   const { user, logout, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const [currentScreen, setCurrentScreen] = useState('screen1');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [stats, setStats] = useState<DashboardStats>({
+    totalTasks: 0,
+    completedTasks: 0,
+    incompleteTasks: 0,
+    totalFocusTime: 0,
+    todayFocusSessions: 0,
+    currentStreak: 0,
+    recentMoods: [],
+    topTask: null,
+  });
+
+  useEffect(() => {
+    if (user) {
+      fetchDashboardData();
+    }
+  }, [user]);
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+
+      // Fetch tasks
+      const { data: tasks, error: tasksError } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('user_id', user?.id);
+
+      if (tasksError) throw tasksError;
+
+      // Fetch focus sessions
+      const { data: sessions, error: sessionsError } = await supabase
+        .from('focus_sessions')
+        .select('*')
+        .eq('user_id', user?.id)
+        .order('completed_at', { ascending: false });
+
+      if (sessionsError) throw sessionsError;
+
+      // Fetch recent moods (last 7 days)
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const { data: moods, error: moodsError } = await supabase
+        .from('daily_moods')
+        .select('*')
+        .eq('user_id', user?.id)
+        .gte('mood_date', sevenDaysAgo.toISOString().split('T')[0])
+        .order('mood_date', { ascending: false });
+
+      if (moodsError) throw moodsError;
+
+      // Calculate stats
+      const completedTasks = tasks?.filter((t) => t.completed).length || 0;
+      const incompleteTasks = tasks?.filter((t) => !t.completed).length || 0;
+      const totalFocusTime = tasks?.reduce((sum, t) => sum + (t.focus_time || 0), 0) || 0;
+
+      // Count today's focus sessions
+      const today = new Date().toISOString().split('T')[0];
+      const todaySessions = sessions?.filter((s) => 
+        s.completed_at?.startsWith(today)
+      ).length || 0;
+
+      // Calculate current streak (consecutive days with focus sessions)
+      const streak = calculateStreak(sessions || []);
+
+      // Find task with most focus time
+      const topTask = tasks && tasks.length > 0
+        ? tasks.reduce((max, task) => 
+            (task.focus_time || 0) > (max.focus_time || 0) ? task : max
+          )
+        : null;
+
+      setStats({
+        totalTasks: tasks?.length || 0,
+        completedTasks,
+        incompleteTasks,
+        totalFocusTime,
+        todayFocusSessions: todaySessions,
+        currentStreak: streak,
+        recentMoods: moods || [],
+        topTask: (topTask?.focus_time || 0) > 0 ? topTask : null,
+      });
+    } catch (error: any) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const calculateStreak = (sessions: FocusSession[]): number => {
+    if (!sessions || sessions.length === 0) return 0;
+
+    const uniqueDates = [...new Set(
+      sessions.map((s) => s.completed_at?.split('T')[0])
+    )].sort().reverse();
+
+    let streak = 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (let i = 0; i < uniqueDates.length; i++) {
+      const checkDate = new Date(today);
+      checkDate.setDate(checkDate.getDate() - i);
+      const checkDateStr = checkDate.toISOString().split('T')[0];
+
+      if (uniqueDates.includes(checkDateStr)) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+
+    return streak;
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchDashboardData();
+  };
 
   if (!isAuthenticated && !isLoading) {
     return <Redirect href="/auth/login" />;
@@ -102,15 +258,62 @@ export default function Dashboard() {
   };
   const timeOfDay = getTimeOfDay();
 
-  const focusGoal = "Complete one study session without phone distractions.";
-  const focusStreak = 4;
+  const focusGoal = stats.topTask?.text || user?.goals?.[0] || "Complete one study session without phone distractions.";
+  const focusStreak = stats.currentStreak;
   const totalStreakDays = 7;
 
-  const todayProgress = 50;
-  const completedTasks = 4;
-  const totalTasks = 8;
-  const moodTrend = "improving";
-  const dailyAffirmation = "My mind can slow down — I am in control of my attention.";
+  const todayProgress = stats.totalTasks > 0 
+    ? Math.round((stats.completedTasks / stats.totalTasks) * 100) 
+    : 0;
+  const completedTasks = stats.completedTasks;
+  const totalTasks = stats.totalTasks;
+
+  // Calculate mood trend
+  const getMoodTrend = () => {
+    if (stats.recentMoods.length < 2) return "stable";
+    
+    const recent = stats.recentMoods.slice(0, 3);
+    const older = stats.recentMoods.slice(3, 6);
+    
+    if (recent.length === 0 || older.length === 0) return "stable";
+    
+    const recentAvg = recent.reduce((sum, m) => sum + m.mood_value, 0) / recent.length;
+    const olderAvg = older.reduce((sum, m) => sum + m.mood_value, 0) / older.length;
+    
+    // Lower mood_value is better (1 = Great, 5 = Stressed)
+    if (recentAvg < olderAvg - 0.5) return "improving";
+    if (recentAvg > olderAvg + 0.5) return "declining";
+    return "stable";
+  };
+
+  const moodTrend = getMoodTrend();
+
+  const affirmations = [
+    "My mind can slow down — I am in control of my attention.",
+    "I choose focus over distraction, one moment at a time.",
+    "Every small step forward is progress worth celebrating.",
+    "I am capable of deep, meaningful work.",
+    "My concentration grows stronger with practice.",
+  ];
+  const dailyAffirmation = affirmations[new Date().getDate() % affirmations.length];
+
+  const formatFocusTime = (minutes: number) => {
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  };
+
+  if (loading && !refreshing) {
+    return (
+      <Background>
+        <View style={[styles.container, styles.centerContent]}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading dashboard...</Text>
+        </View>
+      </Background>
+    );
+  }
 
   return (
     <Background>
@@ -129,7 +332,7 @@ export default function Dashboard() {
               <Text style={styles.logoText}>FocusFlow</Text>
             </View>
             <View style={styles.headerIcons}>
-              <TouchableOpacity style={styles.iconButton}>
+              <TouchableOpacity style={styles.iconButton} onPress={() => router.push('/(tabs)/settings')}>
                 <Ionicons name="settings-outline" size={22} color={Colors.primary} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.iconButton} onPress={handleLogout}>
@@ -143,6 +346,14 @@ export default function Dashboard() {
           style={styles.scrollView} 
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={Colors.primary}
+              colors={[Colors.primary]}
+            />
+          }
         >
           <View style={styles.greetingSection}>
             <Text style={styles.userName}>{userName}!</Text>
@@ -194,13 +405,23 @@ export default function Dashboard() {
                 <View style={styles.cardHeader}>
                   <View style={styles.cardTitleContainer}>
                     <Ionicons name="star-outline" size={24} color={Colors.white} />
-                    <Text style={styles.cardTitle}>Focus Goal of the Day</Text>
+                    <Text style={styles.cardTitle}>
+                      {stats.topTask ? 'Top Focus Goal' : 'Focus Goal of the Day'}
+                    </Text>
                   </View>
-                  <TouchableOpacity>
-                    <Ionicons name="refresh-outline" size={20} color={Colors.white} />
+                  <TouchableOpacity onPress={() => router.push('/focus-tracker')}>
+                    <Ionicons name="arrow-forward" size={20} color={Colors.white} />
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.goalText}>{focusGoal}</Text>
+                {stats.topTask && (
+                  <View style={styles.goalMetaBadge}>
+                    <Ionicons name="time" size={14} color={Colors.white} />
+                    <Text style={styles.goalMetaText}>
+                      {formatFocusTime(stats.topTask.focus_time)} focused
+                    </Text>
+                  </View>
+                )}
               </DashboardCard>
 
               <DashboardCard 
@@ -221,7 +442,10 @@ export default function Dashboard() {
                   ))}
                 </View>
                 <Text style={styles.streakDescription}>
-                  You've stayed focused {focusStreak} days in a row!
+                  {focusStreak > 0 
+                    ? `You've stayed focused ${focusStreak} day${focusStreak > 1 ? 's' : ''} in a row!`
+                    : "Start a focus session to begin your streak!"
+                  }
                 </Text>
               </DashboardCard>
 
@@ -229,17 +453,24 @@ export default function Dashboard() {
                 <View style={styles.cardHeader}>
                   <View style={styles.cardTitleContainer}>
                     <Ionicons name="sparkles-outline" size={24} color={Colors.textDark} />
-                    <Text style={styles.cardTitleDark}>AI Insights</Text>
+                    <Text style={styles.cardTitleDark}>Focus Summary</Text>
                   </View>
                 </View>
-                <Text style={styles.insightText}>
-                  See when your mind feels most focused and calm — <Text style={styles.italicText}>your flow, your rhythm</Text>
-                </Text>
+                <View style={styles.summaryGrid}>
+                  <View style={styles.summaryItem}>
+                    <Text style={styles.summaryValue}>{stats.todayFocusSessions}</Text>
+                    <Text style={styles.summaryLabel}>Sessions Today</Text>
+                  </View>
+                  <View style={styles.summaryItem}>
+                    <Text style={styles.summaryValue}>{formatFocusTime(stats.totalFocusTime)}</Text>
+                    <Text style={styles.summaryLabel}>Total Focus Time</Text>
+                  </View>
+                </View>
                 <TouchableOpacity 
                   style={styles.insightButton}
                   onPress={() => router.push('/(tabs)/dashboard/insight')}
                 >
-                  <Text style={styles.insightButtonText}>View Insights</Text>
+                  <Text style={styles.insightButtonText}>View Detailed Insights</Text>
                 </TouchableOpacity>
               </DashboardCard>
             </View>
@@ -264,7 +495,12 @@ export default function Dashboard() {
                   <View style={[styles.progressBarFill, { width: `${todayProgress}%` }]} />
                 </View>
                 <Text style={styles.progressText}>
-                  Great job! You've completed {completedTasks} of {totalTasks} tasks today.
+                  {totalTasks === 0 
+                    ? "No tasks yet. Add tasks to track your progress!"
+                    : completedTasks === totalTasks
+                    ? `Amazing! You've completed all ${totalTasks} tasks!`
+                    : `Great job! You've completed ${completedTasks} of ${totalTasks} tasks today.`
+                  }
                 </Text>
               </DashboardCard>
 
@@ -279,7 +515,19 @@ export default function Dashboard() {
                   </View>
                 </View>
                 <Text style={styles.moodText}>
-                  Your mood has been <Text style={styles.improvingText}>{moodTrend}</Text> this week! Keep up the positive momentum.
+                  {stats.recentMoods.length === 0 
+                    ? "Start tracking your mood to see trends over time!"
+                    : moodTrend === "improving"
+                    ? "Your mood has been improving this week! Keep up the positive momentum."
+                    : moodTrend === "declining"
+                    ? "Your mood has been declining lately. Remember to take breaks and practice self-care."
+                    : "Your mood has been stable this week. Keep maintaining your balance!"
+                  }
+                  {moodTrend !== "stable" && stats.recentMoods.length > 0 && (
+                    <Text style={[styles.improvingText, moodTrend === "declining" && styles.decliningText]}>
+                      {' '}{moodTrend}
+                    </Text>
+                  )}
                 </Text>
               </DashboardCard>
 
@@ -292,7 +540,7 @@ export default function Dashboard() {
                     <Ionicons name="heart-outline" size={24} color={Colors.cardDark1} />
                     <Text style={styles.cardTitleGradient}>Daily Affirmation</Text>
                   </View>
-                  <TouchableOpacity>
+                  <TouchableOpacity onPress={onRefresh}>
                     <Ionicons name="refresh-outline" size={20} color={Colors.cardDark1} />
                   </TouchableOpacity>
                 </View>
@@ -309,6 +557,15 @@ export default function Dashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: Colors.textLight,
   },
   header: {
     backgroundColor: 'transparent',
@@ -489,6 +746,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '400',
   },
+  goalMetaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    alignSelf: 'center',
+    marginTop: 12,
+  },
+  goalMetaText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.white,
+  },
   fireContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -505,17 +778,24 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontWeight: '400',
   },
-  insightText: {
-    fontSize: 15,
-    color: Colors.textMedium,
-    lineHeight: 22,
-    textAlign: 'center',
+  summaryGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
     marginBottom: 20,
-    fontWeight: '400',
   },
-  italicText: {
-    fontStyle: 'italic',
-    fontWeight: '300',
+  summaryItem: {
+    alignItems: 'center',
+  },
+  summaryValue: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: Colors.primary,
+    marginBottom: 4,
+  },
+  summaryLabel: {
+    fontSize: 12,
+    color: Colors.textLight,
+    textAlign: 'center',
   },
   insightButton: {
     backgroundColor: Colors.primary,
@@ -568,6 +848,10 @@ const styles = StyleSheet.create({
   improvingText: {
     fontWeight: '700',
     color: Colors.primary,
+  },
+  decliningText: {
+    fontWeight: '700',
+    color: '#FF6B6B',
   },
   affirmationTextGradient: {
     fontSize: 17,

@@ -48,31 +48,22 @@ export default function AdminQuestions() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Modal states
   const [showQuestionModal, setShowQuestionModal] = useState(false);
-  const [editingQuestion, setEditingQuestion] = useState<QuizQuestion | null>(
-    null
-  );
+  const [editingQuestion, setEditingQuestion] = useState<QuizQuestion | null>(null);
 
-  // Form states
   const [formQuestion, setFormQuestion] = useState("");
   const [formType, setFormType] = useState<'multiple_choice' | 'true_false' | 'rating'>('multiple_choice');
   const [formOptions, setFormOptions] = useState(["", "", "", ""]);
   const [formCorrectAnswer, setFormCorrectAnswer] = useState("");
   const [formExplanation, setFormExplanation] = useState("");
-  const [formDifficulty, setFormDifficulty] = useState<
-    "easy" | "medium" | "hard"
-  >("easy");
+  const [formDifficulty, setFormDifficulty] = useState<"easy" | "medium" | "hard">("easy");
   const [saving, setSaving] = useState(false);
 
   const isAdmin = user?.is_admin || false;
 
   useEffect(() => {
     if (!isAdmin) {
-      Alert.alert(
-        "Access Denied",
-        "You need admin privileges to access this page"
-      );
+      Alert.alert("Access Denied", "You need admin privileges to access this page");
       router.back();
       return;
     }
@@ -120,12 +111,12 @@ export default function AdminQuestions() {
 
       if (error) throw error;
 
-      const formattedQuestions = data.map((q) => ({
+      const formattedQuestions = data?.map((q) => ({
         ...q,
         options: Array.isArray(q.options) ? q.options : [],
-      }));
+      })) || [];
 
-      setQuestions(formattedQuestions || []);
+      setQuestions(formattedQuestions);
     } catch (error: any) {
       console.error("Error fetching questions:", error);
       Alert.alert("Error", "Failed to load questions");
@@ -142,9 +133,7 @@ export default function AdminQuestions() {
     setEditingQuestion(question);
     setFormQuestion(question.question);
     setFormType(question.question_type);
-    setFormOptions(
-      question.options.length > 0 ? question.options : ["", "", "", ""]
-    );
+    setFormOptions(question.options.length > 0 ? question.options : ["", "", "", ""]);
     setFormCorrectAnswer(question.correct_answer);
     setFormExplanation(question.explanation);
     setFormDifficulty(question.difficulty);
@@ -161,7 +150,6 @@ export default function AdminQuestions() {
   };
 
   const handleSaveQuestion = async () => {
-    // Validation
     if (!formQuestion.trim()) {
       Alert.alert("Error", "Please enter a question");
       return;
@@ -196,21 +184,15 @@ export default function AdminQuestions() {
         category_id: selectedCategory,
         question: formQuestion.trim(),
         question_type: formType,
-        options:
-          formType === "multiple_choice"
-            ? formOptions.filter((opt) => opt.trim())
-            : ["True", "False"],
+        options: formType === "multiple_choice" ? formOptions.filter((opt) => opt.trim()) : ["True", "False"],
         correct_answer: formCorrectAnswer,
         explanation: formExplanation.trim(),
         difficulty: formDifficulty,
-        order_index: editingQuestion
-          ? editingQuestion.order_index
-          : questions.length,
-        is_active: true,
+        order_index: editingQuestion ? editingQuestion.order_index : questions.length,
+        is_active: editingQuestion ? editingQuestion.is_active : true,
       };
 
       if (editingQuestion) {
-        // Update existing question
         const { error } = await supabase
           .from("quiz_questions")
           .update(questionData)
@@ -219,10 +201,7 @@ export default function AdminQuestions() {
         if (error) throw error;
         Alert.alert("Success", "Question updated successfully");
       } else {
-        // Create new question
-        const { error } = await supabase
-          .from("quiz_questions")
-          .insert(questionData);
+        const { error } = await supabase.from("quiz_questions").insert(questionData);
 
         if (error) throw error;
         Alert.alert("Success", "Question added successfully");
@@ -230,10 +209,10 @@ export default function AdminQuestions() {
 
       setShowQuestionModal(false);
       resetForm();
-      fetchQuestions();
+      await fetchQuestions();
     } catch (error: any) {
       console.error("Error saving question:", error);
-      Alert.alert("Error", "Failed to save question");
+      Alert.alert("Error", error.message || "Failed to save question");
     } finally {
       setSaving(false);
     }
@@ -258,10 +237,10 @@ export default function AdminQuestions() {
               if (error) throw error;
 
               Alert.alert("Success", "Question deleted");
-              fetchQuestions();
+              await fetchQuestions();
             } catch (error: any) {
               console.error("Error deleting question:", error);
-              Alert.alert("Error", "Failed to delete question");
+              Alert.alert("Error", error.message || "Failed to delete question");
             }
           },
         },
@@ -271,16 +250,30 @@ export default function AdminQuestions() {
 
   const handleToggleActive = async (question: QuizQuestion) => {
     try {
+      const newActiveState = !question.is_active;
+      
       const { error } = await supabase
         .from("quiz_questions")
-        .update({ is_active: !question.is_active })
+        .update({ is_active: newActiveState })
         .eq("id", question.id);
 
-      if (error) throw error;
-      fetchQuestions();
+      if (error) {
+        console.error("Toggle error:", error);
+        throw error;
+      }
+      
+      // Update local state immediately for better UX
+      setQuestions(prevQuestions =>
+        prevQuestions.map(q =>
+          q.id === question.id ? { ...q, is_active: newActiveState } : q
+        )
+      );
+      
+      // Also fetch to ensure sync
+      await fetchQuestions();
     } catch (error: any) {
       console.error("Error toggling question:", error);
-      Alert.alert("Error", "Failed to update question");
+      Alert.alert("Error", error.message || "Failed to update question status");
     }
   };
 
@@ -300,49 +293,28 @@ export default function AdminQuestions() {
   return (
     <Background>
       <View style={styles.container}>
-        {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerContent}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => router.back()}
-            >
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
               <Ionicons name="arrow-back" size={24} color={Colors.primary} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Manage Questions</Text>
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={openAddQuestionModal}
-            >
+            <TouchableOpacity style={styles.addButton} onPress={openAddQuestionModal}>
               <Ionicons name="add-circle" size={28} color={Colors.primary} />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Category Selector */}
         <View style={styles.categorySection}>
           <Text style={styles.sectionLabel}>Category:</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.categoryScroll}
-          >
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
             {categories.map((category) => (
               <TouchableOpacity
                 key={category.id}
-                style={[
-                  styles.categoryChip,
-                  selectedCategory === category.id && styles.categoryChipActive,
-                ]}
+                style={[styles.categoryChip, selectedCategory === category.id && styles.categoryChipActive]}
                 onPress={() => setSelectedCategory(category.id)}
               >
-                <Text
-                  style={[
-                    styles.categoryChipText,
-                    selectedCategory === category.id &&
-                      styles.categoryChipTextActive,
-                  ]}
-                >
+                <Text style={[styles.categoryChipText, selectedCategory === category.id && styles.categoryChipTextActive]}>
                   {category.title}
                 </Text>
               </TouchableOpacity>
@@ -350,97 +322,58 @@ export default function AdminQuestions() {
           </ScrollView>
         </View>
 
-        {/* Questions List */}
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           {questions.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Ionicons
-                name="document-outline"
-                size={64}
-                color={Colors.textLight}
-              />
+              <Ionicons name="document-outline" size={64} color={Colors.textLight} />
               <Text style={styles.emptyText}>No questions yet</Text>
-              <Text style={styles.emptySubtext}>
-                Tap the + button to add your first question
-              </Text>
+              <Text style={styles.emptySubtext}>Tap the + button to add your first question</Text>
             </View>
           ) : (
             questions.map((question, index) => (
-              <View key={question.id} style={styles.questionCard}>
+              <View key={question.id} style={[styles.questionCard, !question.is_active && styles.questionCardInactive]}>
                 <View style={styles.questionHeader}>
                   <View style={styles.questionNumber}>
                     <Text style={styles.questionNumberText}>{index + 1}</Text>
                   </View>
                   <View style={styles.questionBadges}>
                     <View style={styles.difficultyBadge}>
-                      <Text style={styles.badgeText}>
-                        {question.difficulty}
-                      </Text>
+                      <Text style={styles.badgeText}>{question.difficulty}</Text>
                     </View>
                     <View style={styles.typeBadge}>
-                      <Text style={styles.badgeText}>
-                        {question.question_type === "multiple_choice"
-                          ? "MC"
-                          : "T/F"}
-                      </Text>
+                      <Text style={styles.badgeText}>{question.question_type === "multiple_choice" ? "MC" : "T/F"}</Text>
                     </View>
+                    {!question.is_active && (
+                      <View style={styles.inactiveBadge}>
+                        <Text style={styles.inactiveBadgeText}>Hidden</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
 
-                <Text style={styles.questionTitle}>{question.question}</Text>
+                <Text style={[styles.questionTitle, !question.is_active && styles.questionTitleInactive]}>
+                  {question.question}
+                </Text>
 
                 <View style={styles.answerPreview}>
                   <Text style={styles.answerLabel}>Correct Answer:</Text>
-                  <Text style={styles.answerText}>
-                    {question.correct_answer}
-                  </Text>
+                  <Text style={styles.answerText}>{question.correct_answer}</Text>
                 </View>
 
                 <View style={styles.questionActions}>
-                  <TouchableOpacity
-                    style={[styles.actionButton, styles.editButton]}
-                    onPress={() => openEditQuestionModal(question)}
-                  >
-                    <Ionicons
-                      name="create-outline"
-                      size={20}
-                      color={Colors.primary}
-                    />
+                  <TouchableOpacity style={[styles.actionButton, styles.editButton]} onPress={() => openEditQuestionModal(question)}>
+                    <Ionicons name="create-outline" size={20} color={Colors.primary} />
                     <Text style={styles.actionButtonText}>Edit</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.actionButton, styles.toggleButton]}
-                    onPress={() => handleToggleActive(question)}
-                  >
-                    <Ionicons
-                      name={
-                        question.is_active ? "eye-outline" : "eye-off-outline"
-                      }
-                      size={20}
-                      color={
-                        question.is_active ? Colors.primary : Colors.textLight
-                      }
-                    />
-                    <Text style={styles.actionButtonText}>
-                      {question.is_active ? "Active" : "Hidden"}
-                    </Text>
+                  <TouchableOpacity style={[styles.actionButton, styles.toggleButton]} onPress={() => handleToggleActive(question)}>
+                    <Ionicons name={question.is_active ? "eye-outline" : "eye-off-outline"} size={20} color={question.is_active ? Colors.primary : Colors.textLight} />
+                    <Text style={styles.actionButtonText}>{question.is_active ? "Active" : "Hidden"}</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.actionButton, styles.deleteButton]}
-                    onPress={() => handleDeleteQuestion(question)}
-                  >
+                  <TouchableOpacity style={[styles.actionButton, styles.deleteButton]} onPress={() => handleDeleteQuestion(question)}>
                     <Ionicons name="trash-outline" size={20} color="#FF6B6B" />
-                    <Text
-                      style={[styles.actionButtonText, styles.deleteButtonText]}
-                    >
-                      Delete
-                    </Text>
+                    <Text style={[styles.actionButtonText, styles.deleteButtonText]}>Delete</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -448,35 +381,17 @@ export default function AdminQuestions() {
           )}
         </ScrollView>
 
-        {/* Add/Edit Question Modal */}
-        <Modal
-          visible={showQuestionModal}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setShowQuestionModal(false)}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-            style={styles.modalOverlay}
-          >
+        <Modal visible={showQuestionModal} transparent animationType="slide" onRequestClose={() => setShowQuestionModal(false)}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>
-                  {editingQuestion ? "Edit Question" : "Add New Question"}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setShowQuestionModal(false)}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
+                <Text style={styles.modalTitle}>{editingQuestion ? "Edit Question" : "Add New Question"}</Text>
+                <TouchableOpacity onPress={() => setShowQuestionModal(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                   <Ionicons name="close" size={28} color={Colors.textMedium} />
                 </TouchableOpacity>
               </View>
 
-              <ScrollView
-                style={styles.modalScroll}
-                showsVerticalScrollIndicator={false}
-              >
-                {/* Question Input */}
+              <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
                 <Text style={styles.inputLabel}>Question *</Text>
                 <TextInput
                   style={styles.textInput}
@@ -487,51 +402,29 @@ export default function AdminQuestions() {
                   multiline
                 />
 
-                {/* Question Type */}
                 <Text style={styles.inputLabel}>Question Type *</Text>
                 <View style={styles.typeSelector}>
                   <TouchableOpacity
-                    style={[
-                      styles.typeOption,
-                      formType === "multiple_choice" && styles.typeOptionActive,
-                    ]}
+                    style={[styles.typeOption, formType === "multiple_choice" && styles.typeOptionActive]}
                     onPress={() => setFormType("multiple_choice")}
                   >
-                    <Text
-                      style={[
-                        styles.typeOptionText,
-                        formType === "multiple_choice" &&
-                          styles.typeOptionTextActive,
-                      ]}
-                    >
+                    <Text style={[styles.typeOptionText, formType === "multiple_choice" && styles.typeOptionTextActive]}>
                       Multiple Choice
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[
-                      styles.typeOption,
-                      formType === "true_false" && styles.typeOptionActive,
-                    ]}
+                    style={[styles.typeOption, formType === "true_false" && styles.typeOptionActive]}
                     onPress={() => setFormType("true_false")}
                   >
-                    <Text
-                      style={[
-                        styles.typeOptionText,
-                        formType === "true_false" &&
-                          styles.typeOptionTextActive,
-                      ]}
-                    >
+                    <Text style={[styles.typeOptionText, formType === "true_false" && styles.typeOptionTextActive]}>
                       True/False
                     </Text>
                   </TouchableOpacity>
                 </View>
 
-                {/* Options (for multiple choice) */}
                 {formType === "multiple_choice" && (
                   <>
-                    <Text style={styles.inputLabel}>
-                      Options * (at least 2)
-                    </Text>
+                    <Text style={styles.inputLabel}>Options * (at least 2)</Text>
                     {formOptions.map((option, index) => (
                       <View key={index} style={styles.optionInputRow}>
                         <TextInput
@@ -546,25 +439,14 @@ export default function AdminQuestions() {
                           }}
                         />
                         <TouchableOpacity
-                          style={[
-                            styles.correctButton,
-                            formCorrectAnswer === option &&
-                              styles.correctButtonActive,
-                          ]}
-                          onPress={() => setFormCorrectAnswer(option)}
+                          style={[styles.correctButton, formCorrectAnswer === option && option.trim() && styles.correctButtonActive]}
+                          onPress={() => option.trim() && setFormCorrectAnswer(option)}
+                          disabled={!option.trim()}
                         >
                           <Ionicons
-                            name={
-                              formCorrectAnswer === option
-                                ? "checkmark-circle"
-                                : "checkmark-circle-outline"
-                            }
+                            name={formCorrectAnswer === option && option.trim() ? "checkmark-circle" : "checkmark-circle-outline"}
                             size={24}
-                            color={
-                              formCorrectAnswer === option
-                                ? Colors.primary
-                                : Colors.textLight
-                            }
+                            color={formCorrectAnswer === option && option.trim() ? Colors.primary : Colors.textLight}
                           />
                         </TouchableOpacity>
                       </View>
@@ -572,44 +454,23 @@ export default function AdminQuestions() {
                   </>
                 )}
 
-                {/* True/False Selection */}
                 {formType === "true_false" && (
                   <>
                     <Text style={styles.inputLabel}>Correct Answer *</Text>
                     <View style={styles.trueFalseSelector}>
                       <TouchableOpacity
-                        style={[
-                          styles.trueFalseOption,
-                          formCorrectAnswer === "True" &&
-                            styles.trueFalseOptionActive,
-                        ]}
+                        style={[styles.trueFalseOption, formCorrectAnswer === "True" && styles.trueFalseOptionActive]}
                         onPress={() => setFormCorrectAnswer("True")}
                       >
-                        <Text
-                          style={[
-                            styles.trueFalseText,
-                            formCorrectAnswer === "True" &&
-                              styles.trueFalseTextActive,
-                          ]}
-                        >
+                        <Text style={[styles.trueFalseText, formCorrectAnswer === "True" && styles.trueFalseTextActive]}>
                           True
                         </Text>
                       </TouchableOpacity>
                       <TouchableOpacity
-                        style={[
-                          styles.trueFalseOption,
-                          formCorrectAnswer === "False" &&
-                            styles.trueFalseOptionActive,
-                        ]}
+                        style={[styles.trueFalseOption, formCorrectAnswer === "False" && styles.trueFalseOptionActive]}
                         onPress={() => setFormCorrectAnswer("False")}
                       >
-                        <Text
-                          style={[
-                            styles.trueFalseText,
-                            formCorrectAnswer === "False" &&
-                              styles.trueFalseTextActive,
-                          ]}
-                        >
+                        <Text style={[styles.trueFalseText, formCorrectAnswer === "False" && styles.trueFalseTextActive]}>
                           False
                         </Text>
                       </TouchableOpacity>
@@ -617,7 +478,6 @@ export default function AdminQuestions() {
                   </>
                 )}
 
-                {/* Explanation */}
                 <Text style={styles.inputLabel}>Explanation *</Text>
                 <TextInput
                   style={styles.textInput}
@@ -628,57 +488,29 @@ export default function AdminQuestions() {
                   multiline
                 />
 
-                {/* Difficulty */}
                 <Text style={styles.inputLabel}>Difficulty *</Text>
                 <View style={styles.difficultySelector}>
                   {(["easy", "medium", "hard"] as const).map((level) => (
                     <TouchableOpacity
                       key={level}
-                      style={[
-                        styles.difficultyOption,
-                        formDifficulty === level &&
-                          styles.difficultyOptionActive,
-                      ]}
+                      style={[styles.difficultyOption, formDifficulty === level && styles.difficultyOptionActive]}
                       onPress={() => setFormDifficulty(level)}
                     >
-                      <Text
-                        style={[
-                          styles.difficultyOptionText,
-                          formDifficulty === level &&
-                            styles.difficultyOptionTextActive,
-                        ]}
-                      >
+                      <Text style={[styles.difficultyOptionText, formDifficulty === level && styles.difficultyOptionTextActive]}>
                         {level.charAt(0).toUpperCase() + level.slice(1)}
                       </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
 
-                {/* Save Button */}
-                <TouchableOpacity
-                  style={[
-                    styles.saveButton,
-                    saving && styles.saveButtonDisabled,
-                  ]}
-                  onPress={handleSaveQuestion}
-                  disabled={saving}
-                >
-                  <LinearGradient
-                    colors={[Colors.primary, Colors.primaryDark]}
-                    style={styles.saveButtonGradient}
-                  >
+                <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSaveQuestion} disabled={saving}>
+                  <LinearGradient colors={[Colors.primary, Colors.primaryDark]} style={styles.saveButtonGradient}>
                     {saving ? (
                       <ActivityIndicator size="small" color={Colors.white} />
                     ) : (
                       <>
-                        <Ionicons
-                          name="checkmark"
-                          size={20}
-                          color={Colors.white}
-                        />
-                        <Text style={styles.saveButtonText}>
-                          {editingQuestion ? "Update Question" : "Add Question"}
-                        </Text>
+                        <Ionicons name="checkmark" size={20} color={Colors.white} />
+                        <Text style={styles.saveButtonText}>{editingQuestion ? "Update Question" : "Add Question"}</Text>
                       </>
                     )}
                   </LinearGradient>
@@ -693,388 +525,77 @@ export default function AdminQuestions() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === "ios" ? 30 : 20,
-    paddingBottom: 15,
-  },
-  headerContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: Colors.white,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: Colors.textDark,
-  },
-  addButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  categorySection: {
-    paddingHorizontal: 20,
-    marginBottom: 16,
-  },
-  sectionLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: Colors.textMedium,
-    marginBottom: 10,
-  },
-  categoryScroll: {
-    flexGrow: 0,
-  },
-  categoryChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: Colors.background,
-    marginRight: 10,
-    borderWidth: 1,
-    borderColor: "transparent",
-  },
-  categoryChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primaryDark,
-  },
-  categoryChipText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: Colors.textMedium,
-  },
-  categoryChipTextActive: {
-    color: Colors.white,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 100,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 12,
-  },
-  loadingText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: Colors.textMedium,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: 60,
-    gap: 12,
-  },
-  emptyText: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: Colors.textDark,
-    marginTop: 16,
-  },
-  emptySubtext: {
-    fontSize: 15,
-    color: Colors.textLight,
-    textAlign: "center",
-    paddingHorizontal: 40,
-  },
-  questionCard: {
-    backgroundColor: Colors.white,
-    borderRadius: 20,
-    padding: 18,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#E8E8E8",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 3,
-      },
-    }),
-  },
-  questionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  questionNumber: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  questionNumberText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: Colors.white,
-  },
-  questionBadges: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  difficultyBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: Colors.bubbleMedium,
-  },
-  typeBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: Colors.background,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: Colors.textMedium,
-    textTransform: "uppercase",
-  },
-  questionTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: Colors.textDark,
-    marginBottom: 12,
-    lineHeight: 22,
-  },
-  answerPreview: {
-    backgroundColor: Colors.background,
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  answerLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: Colors.textLight,
-    marginBottom: 4,
-  },
-  answerText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: Colors.primary,
-  },
-  questionActions: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  editButton: {
-    backgroundColor: Colors.bubbleLight,
-    borderColor: Colors.primary,
-  },
-  toggleButton: {
-    backgroundColor: Colors.background,
-    borderColor: "#E8E8E8",
-  },
-  deleteButton: {
-    backgroundColor: "rgba(255, 107, 107, 0.1)",
-    borderColor: "#FF6B6B",
-  },
-  actionButtonText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: Colors.textMedium,
-  },
-  deleteButtonText: {
-    color: "#FF6B6B",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "flex-end",
-  },
-  modalContent: {
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    paddingTop: 24,
-    paddingHorizontal: 24,
-    maxHeight: "90%",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: Colors.textDark,
-  },
-  modalScroll: {
-    marginBottom: 20,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: Colors.textMedium,
-    marginBottom: 8,
-    marginTop: 16,
-  },
-  textInput: {
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 15,
-    color: Colors.textDark,
-    minHeight: 50,
-    textAlignVertical: "top",
-  },
-  typeSelector: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  typeOption: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  typeOptionActive: {
-    backgroundColor: Colors.bubbleLight,
-    borderColor: Colors.primary,
-  },
-  typeOptionText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: Colors.textMedium,
-  },
-  typeOptionTextActive: {
-    color: Colors.primary,
-  },
-  optionInputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 10,
-  },
-  optionInput: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 15,
-    color: Colors.textDark,
-  },
-  correctButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  correctButtonActive: {
-    backgroundColor: Colors.bubbleLight,
-    borderRadius: 12,
-  },
-  trueFalseSelector: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  trueFalseOption: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  trueFalseOptionActive: {
-    backgroundColor: Colors.bubbleLight,
-    borderColor: Colors.primary,
-  },
-  trueFalseText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: Colors.textMedium,
-  },
-  trueFalseTextActive: {
-    color: Colors.primary,
-  },
-  difficultySelector: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  difficultyOption: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "transparent",
-  },
-  difficultyOptionActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primaryDark,
-  },
-  difficultyOptionText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: Colors.textMedium,
-  },
-  difficultyOptionTextActive: {
-    color: Colors.white,
-  },
-  saveButton: {
-    marginTop: 24,
-    marginBottom: 20,
-    borderRadius: 16,
-    overflow: "hidden",
-  },
-  saveButtonDisabled: {
-    opacity: 0.7,
-  },
-  saveButtonGradient: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 16,
-  },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: Colors.white,
-  },
+  container: { flex: 1 },
+  header: { paddingHorizontal: 20, paddingTop: Platform.OS === "ios" ? 60 : 20, paddingBottom: 15 },
+  headerContent: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  backButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: Colors.white, alignItems: "center", justifyContent: "center" },
+  headerTitle: { fontSize: 20, fontWeight: "700", color: Colors.textDark },
+  addButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  categorySection: { paddingHorizontal: 20, marginBottom: 16 },
+  sectionLabel: { fontSize: 14, fontWeight: "600", color: Colors.textMedium, marginBottom: 10 },
+  categoryScroll: { flexGrow: 0 },
+  categoryChip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: Colors.background, marginRight: 10, borderWidth: 1, borderColor: "transparent" },
+  categoryChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primaryDark },
+  categoryChipText: { fontSize: 14, fontWeight: "600", color: Colors.textMedium },
+  categoryChipTextActive: { color: Colors.white },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
+  loadingText: { fontSize: 16, fontWeight: "600", color: Colors.textMedium },
+  emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center", paddingVertical: 60, gap: 12 },
+  emptyText: { fontSize: 20, fontWeight: "700", color: Colors.textDark, marginTop: 16 },
+  emptySubtext: { fontSize: 15, color: Colors.textLight, textAlign: "center", paddingHorizontal: 40 },
+  questionCard: { backgroundColor: Colors.white, borderRadius: 20, padding: 18, marginBottom: 16, borderWidth: 1, borderColor: "#E8E8E8", ...Platform.select({ ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8 }, android: { elevation: 3 } }) },
+  questionCardInactive: { opacity: 0.6, backgroundColor: "#F5F5F5" },
+  questionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  questionNumber: { width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.primary, alignItems: "center", justifyContent: "center" },
+  questionNumberText: { fontSize: 14, fontWeight: "700", color: Colors.white },
+  questionBadges: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  difficultyBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: Colors.bubbleMedium },
+  typeBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: Colors.background },
+  inactiveBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: "#FF6B6B" },
+  inactiveBadgeText: { fontSize: 11, fontWeight: "700", color: Colors.white, textTransform: "uppercase" },
+  badgeText: { fontSize: 11, fontWeight: "700", color: Colors.textMedium, textTransform: "uppercase" },
+  questionTitle: { fontSize: 16, fontWeight: "600", color: Colors.textDark, marginBottom: 12, lineHeight: 22 },
+  questionTitleInactive: { color: Colors.textLight },
+  answerPreview: { backgroundColor: Colors.background, padding: 12, borderRadius: 12, marginBottom: 12 },
+  answerLabel: { fontSize: 12, fontWeight: "600", color: Colors.textLight, marginBottom: 4 },
+  answerText: { fontSize: 14, fontWeight: "600", color: Colors.primary },
+  questionActions: { flexDirection: "row", gap: 8 },
+  actionButton: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 12, borderWidth: 1 },
+  editButton: { backgroundColor: Colors.bubbleLight, borderColor: Colors.primary },
+  toggleButton: { backgroundColor: Colors.background, borderColor: "#E8E8E8" },
+  deleteButton: { backgroundColor: "rgba(255, 107, 107, 0.1)", borderColor: "#FF6B6B" },
+  actionButtonText: { fontSize: 13, fontWeight: "600", color: Colors.textMedium },
+  deleteButtonText: { color: "#FF6B6B" },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  modalContent: { backgroundColor: Colors.white, borderTopLeftRadius: 32, borderTopRightRadius: 32, paddingTop: 24, paddingHorizontal: 24, maxHeight: "90%" },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
+  modalTitle: { fontSize: 22, fontWeight: "800", color: Colors.textDark },
+  modalScroll: { marginBottom: 20 },
+  inputLabel: { fontSize: 14, fontWeight: "600", color: Colors.textMedium, marginBottom: 8, marginTop: 16 },
+  textInput: { backgroundColor: Colors.background, borderRadius: 12, padding: 14, fontSize: 15, color: Colors.textDark, minHeight: 50, textAlignVertical: "top" },
+  typeSelector: { flexDirection: "row", gap: 10 },
+  typeOption: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: Colors.background, alignItems: "center", borderWidth: 2, borderColor: "transparent" },
+  typeOptionActive: { backgroundColor: Colors.bubbleLight, borderColor: Colors.primary },
+  typeOptionText: { fontSize: 14, fontWeight: "600", color: Colors.textMedium },
+  typeOptionTextActive: { color: Colors.primary },
+  optionInputRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
+  optionInput: { flex: 1, backgroundColor: Colors.background, borderRadius: 12, padding: 14, fontSize: 15, color: Colors.textDark },
+  correctButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  correctButtonActive: { backgroundColor: Colors.bubbleLight, borderRadius: 12 },
+  trueFalseSelector: { flexDirection: "row", gap: 10 },
+  trueFalseOption: { flex: 1, paddingVertical: 16, borderRadius: 12, backgroundColor: Colors.background, alignItems: "center", borderWidth: 2, borderColor: "transparent" },
+  trueFalseOptionActive: { backgroundColor: Colors.bubbleLight, borderColor: Colors.primary },
+  trueFalseText: { fontSize: 16, fontWeight: "700", color: Colors.textMedium },
+  trueFalseTextActive: { color: Colors.primary },
+  difficultySelector: { flexDirection: "row", gap: 10 },
+  difficultyOption: { flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: Colors.background, alignItems: "center", borderWidth: 1, borderColor: "transparent" },
+  difficultyOptionActive: { backgroundColor: Colors.primary, borderColor: Colors.primaryDark },
+  difficultyOptionText: { fontSize: 13, fontWeight: "600", color: Colors.textMedium },
+  difficultyOptionTextActive: { color: Colors.white },
+  saveButton: { marginTop: 24, marginBottom: 20, borderRadius: 16, overflow: "hidden" },
+  saveButtonDisabled: { opacity: 0.7 },
+  saveButtonGradient: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16 },
+  saveButtonText: { fontSize: 16, fontWeight: "700", color: Colors.white },
 });
