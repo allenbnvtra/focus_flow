@@ -79,7 +79,7 @@ const LoginForm = () => {
           
           <TouchableOpacity 
             style={styles.forgotPassword}
-            onPress={() => Alert.alert('Forgot Password', 'Implement navigation to password reset.')}
+            onPress={() => router.push('/auth/forgot-password')}
             disabled={isLoading}
           >
             <Text style={styles.forgotPasswordText}>
