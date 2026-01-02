@@ -14,9 +14,10 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import Background, { Colors } from "../../../components/Background";
+import Background from "../../../components/Background";
 import { useAuth } from "../../../contexts/AuthContext";
 import { supabase } from "../../../lib/supabase";
+import { useTheme } from "../../../contexts/ThemeContext";
 
 interface Task {
   id: string;
@@ -51,6 +52,8 @@ interface DailyMood {
 type FocusMode = "single" | "all" | null;
 
 export default function FocusTracker() {
+  const { colors, isDarkMode } = useTheme();
+  
   const { user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,7 +121,6 @@ export default function FocusTracker() {
           setTimerMinutes(timerMinutes - 1);
           setTimerSeconds(59);
         } else {
-          // Timer completed
           handleTimerComplete();
         }
       }, 1000);
@@ -135,8 +137,6 @@ export default function FocusTracker() {
       const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
       const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
       
-      console.log("Fetching tasks from:", startOfDay.toISOString(), "to:", endOfDay.toISOString());
-      
       const { data, error } = await supabase
         .from("tasks")
         .select("*")
@@ -145,12 +145,7 @@ export default function FocusTracker() {
         .lt("created_at", endOfDay.toISOString())
         .order("created_at", { ascending: false });
 
-      if (error) {
-        console.error("Fetch tasks error:", error);
-        throw error;
-      }
-
-      console.log("Fetched today's tasks:", data?.length || 0);
+      if (error) throw error;
       setTasks(data || []);
     } catch (error: any) {
       console.error("Error fetching tasks:", error.message);
@@ -164,7 +159,6 @@ export default function FocusTracker() {
   const fetchTodayMood = async () => {
     try {
       const today = new Date().toISOString().split("T")[0];
-      console.log("Fetching mood for date:", today);
 
       const { data, error } = await supabase
         .from("daily_moods")
@@ -173,12 +167,7 @@ export default function FocusTracker() {
         .eq("mood_date", today)
         .maybeSingle();
 
-      if (error) {
-        console.error("Fetch mood error:", error);
-        throw error;
-      }
-
-      console.log("Fetched mood data:", data);
+      if (error) throw error;
       setTodayMood(data);
 
       if (data) {
@@ -201,17 +190,7 @@ export default function FocusTracker() {
       setSavingMood(true);
       const today = new Date().toISOString().split("T")[0];
 
-      console.log("Saving mood:", {
-        user_id: user?.id,
-        mood_value: selectedMood,
-        mood_date: today,
-        notes: moodNotes.trim() || null,
-      });
-
       if (todayMood) {
-        // Update existing mood
-        console.log("Updating existing mood with ID:", todayMood.id);
-
         const { data, error } = await supabase
           .from("daily_moods")
           .update({
@@ -222,17 +201,9 @@ export default function FocusTracker() {
           .select()
           .single();
 
-        if (error) {
-          console.error("Update mood error:", error);
-          throw error;
-        }
-
-        console.log("Mood updated successfully:", data);
+        if (error) throw error;
         setTodayMood(data);
       } else {
-        // Insert new mood
-        console.log("Inserting new mood");
-
         const { data, error } = await supabase
           .from("daily_moods")
           .insert({
@@ -244,12 +215,7 @@ export default function FocusTracker() {
           .select()
           .single();
 
-        if (error) {
-          console.error("Insert mood error:", error);
-          throw error;
-        }
-
-        console.log("Mood inserted successfully:", data);
+        if (error) throw error;
         setTodayMood(data);
       }
 
@@ -328,21 +294,12 @@ export default function FocusTracker() {
       (endTime.getTime() - sessionStartTime.getTime()) / 60000
     );
 
-    // Prevent saving sessions with 0 or negative duration
     if (durationInMinutes <= 0) {
-      console.log("Session duration too short, not saving");
       resetTimerState();
       return;
     }
 
     try {
-      console.log("Saving focus session:", {
-        user_id: user?.id,
-        task_id: selectedTaskId,
-        duration_minutes: durationInMinutes,
-      });
-
-      // Save focus session
       const { error: sessionError } = await supabase
         .from("focus_sessions")
         .insert({
@@ -353,37 +310,20 @@ export default function FocusTracker() {
           completed_at: endTime.toISOString(),
         });
 
-      if (sessionError) {
-        console.error("Session save error:", sessionError);
-        throw sessionError;
-      }
+      if (sessionError) throw sessionError;
 
-      console.log("Focus session saved successfully");
-
-      // Update task focus time
       if (selectedTaskId) {
         const task = tasks.find((t) => t.id === selectedTaskId);
         if (task) {
           const newFocusTime = (task.focus_time || 0) + durationInMinutes;
-
-          console.log("Updating task focus time:", {
-            task_id: selectedTaskId,
-            new_focus_time: newFocusTime,
-          });
 
           const { error: updateError } = await supabase
             .from("tasks")
             .update({ focus_time: newFocusTime })
             .eq("id", selectedTaskId);
 
-          if (updateError) {
-            console.error("Task update error:", updateError);
-            throw updateError;
-          }
+          if (updateError) throw updateError;
 
-          console.log("Task focus time updated successfully");
-
-          // Update local state
           setTasks(
             tasks.map((t) =>
               t.id === selectedTaskId ? { ...t, focus_time: newFocusTime } : t
@@ -392,7 +332,6 @@ export default function FocusTracker() {
         }
       }
 
-      // Handle different modes
       if (focusMode === "all") {
         handleAllTasksModeCompletion();
       } else {
@@ -435,9 +374,7 @@ export default function FocusTracker() {
     const incompleteTasks = tasks.filter((t) => !t.completed);
     const nextIndex = currentTaskIndex + 1;
 
-    // Check if there are more incomplete tasks
     if (nextIndex < incompleteTasks.length) {
-      // Move to next task
       Alert.alert(
         "✅ Task Session Complete!",
         "Ready to move to the next task?",
@@ -462,7 +399,6 @@ export default function FocusTracker() {
         ]
       );
     } else {
-      // All tasks completed - automatically stop timer
       setIsRunning(false);
       setIsPaused(false);
       Alert.alert(
@@ -535,7 +471,6 @@ export default function FocusTracker() {
       (endTime.getTime() - sessionStartTime.getTime()) / 60000
     );
 
-    // Don't save if duration is too short
     if (durationInMinutes <= 0) {
       Alert.alert(
         "Session Too Short",
@@ -548,12 +483,6 @@ export default function FocusTracker() {
     }
 
     try {
-      console.log("Saving partial session:", {
-        user_id: user?.id,
-        task_id: selectedTaskId,
-        duration_minutes: durationInMinutes,
-      });
-
       const { error: sessionError } = await supabase
         .from("focus_sessions")
         .insert({
@@ -564,12 +493,7 @@ export default function FocusTracker() {
           completed_at: endTime.toISOString(),
         });
 
-      if (sessionError) {
-        console.error("Partial session save error:", sessionError);
-        throw sessionError;
-      }
-
-      console.log("Partial session saved successfully");
+      if (sessionError) throw sessionError;
 
       if (selectedTaskId) {
         const task = tasks.find((t) => t.id === selectedTaskId);
@@ -581,10 +505,7 @@ export default function FocusTracker() {
             .update({ focus_time: newFocusTime })
             .eq("id", selectedTaskId);
 
-          if (updateError) {
-            console.error("Task update error:", updateError);
-            throw updateError;
-          }
+          if (updateError) throw updateError;
 
           setTasks(
             tasks.map((t) =>
@@ -618,11 +539,6 @@ export default function FocusTracker() {
     try {
       setAddingTask(true);
 
-      console.log("Adding new task:", {
-        user_id: user?.id,
-        text: newTaskText.trim(),
-      });
-
       const { data, error } = await supabase
         .from("tasks")
         .insert({
@@ -635,12 +551,7 @@ export default function FocusTracker() {
         .select()
         .single();
 
-      if (error) {
-        console.error("Add task error:", error);
-        throw error;
-      }
-
-      console.log("Task added successfully:", data);
+      if (error) throw error;
 
       setTasks([data, ...tasks]);
       setNewTaskText("");
@@ -663,7 +574,6 @@ export default function FocusTracker() {
       ? (task.completion_count || 0) + 1
       : task.completion_count;
 
-    // Optimistic update
     setTasks(
       tasks.map((t) =>
         t.id === taskId
@@ -677,12 +587,6 @@ export default function FocusTracker() {
     );
 
     try {
-      console.log("Toggling task:", {
-        task_id: taskId,
-        completed: updatedCompleted,
-        completion_count: newCompletionCount,
-      });
-
       const { error } = await supabase
         .from("tasks")
         .update({
@@ -691,14 +595,8 @@ export default function FocusTracker() {
         })
         .eq("id", taskId);
 
-      if (error) {
-        console.error("Toggle task error:", error);
-        throw error;
-      }
+      if (error) throw error;
 
-      console.log("Task toggled successfully");
-
-      // Show celebration for completion
       if (updatedCompleted) {
         Alert.alert(
           "✅ Task Completed!",
@@ -707,13 +605,11 @@ export default function FocusTracker() {
           }!`
         );
 
-        // Check if all tasks are now completed during "All Tasks" mode
         if (focusMode === "all" && isRunning) {
           const remainingIncompleteTasks = tasks.filter(
             (t) => t.id !== taskId && !t.completed
           );
 
-          // If this was the last incomplete task, stop the timer
           if (remainingIncompleteTasks.length === 0) {
             setIsRunning(false);
             setIsPaused(false);
@@ -732,7 +628,6 @@ export default function FocusTracker() {
       }
     } catch (error: any) {
       console.error("Error updating task:", error);
-      // Revert on error
       setTasks(
         tasks.map((t) =>
           t.id === taskId
@@ -795,21 +690,13 @@ export default function FocusTracker() {
             setTasks(tasks.filter((t) => t.id !== taskId));
 
             try {
-              console.log("Deleting task:", taskId);
-
               const { error } = await supabase
                 .from("tasks")
                 .delete()
                 .eq("id", taskId);
 
-              if (error) {
-                console.error("Delete task error:", error);
-                throw error;
-              }
+              if (error) throw error;
 
-              console.log("Task deleted successfully");
-
-              // Check if all remaining tasks are completed during "All Tasks" mode
               if (
                 focusMode === "all" &&
                 isRunning &&
@@ -873,6 +760,577 @@ export default function FocusTracker() {
     return moods.find((m) => m.value === value)?.emoji || "😊";
   };
 
+    const styles = StyleSheet.create({
+    container: { flex: 1 },
+    header: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 15 },
+    headerContent: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    logoContainer: { flexDirection: "row", alignItems: "center", gap: 10 },
+    logoIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    logoText: {
+      fontSize: 24,
+      fontWeight: "700",
+      color: colors.primary,
+      letterSpacing: -0.5,
+    },
+    headerIcons: { flexDirection: "row", gap: 10 },
+    iconButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1.5,
+      borderColor: colors.border,
+    },
+    moodButtonEmoji: {
+      fontSize: 24,
+    },
+    scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
+    pageTitle: {
+      fontSize: 28,
+      fontWeight: "800",
+      color: colors.textDark,
+      marginVertical: 15,
+    },
+    timerCard: {
+      backgroundColor: colors.cardBg,
+      borderRadius: 24,
+      padding: 20,
+      marginBottom: 25,
+      elevation: 20,
+      shadowColor: colors.shadow,
+      shadowOpacity: 0.15,
+      shadowRadius: 12,
+      borderWidth: 2,
+      borderColor: colors.border,
+    },
+    timerHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    timerTitleGroup: { flexDirection: "row", alignItems: "center", gap: 8 },
+    timerTitle: { fontSize: 16, fontWeight: "700", color: colors.textDark },
+    editBtn: {
+      backgroundColor: colors.bubbleMedium,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 10,
+    },
+    editBtnText: { color: colors.primaryDark, fontSize: 12, fontWeight: "800" },
+    activeInfoContainer: {
+      marginTop: 12,
+      gap: 8,
+    },
+    modeBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      alignSelf: "flex-start",
+      backgroundColor: isDarkMode ? "rgba(93, 184, 154, 0.2)" : "rgba(79, 195, 247, 0.15)",
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 12,
+    },
+    modeBadgeText: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: colors.primary,
+    },
+    activeTaskBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      backgroundColor: isDarkMode ? "rgba(93, 184, 154, 0.15)" : "rgba(79, 195, 247, 0.1)",
+      padding: 12,
+      borderRadius: 12,
+    },
+    activeTaskText: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: "600",
+      color: colors.primary,
+    },
+    taskProgress: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: colors.primaryDark,
+    },
+    timerDisplay: { alignItems: "center", marginVertical: 20 },
+    timerText: {
+      fontSize: 64,
+      fontWeight: "300",
+      color: colors.textDark,
+      letterSpacing: 2,
+    },
+    pausedText: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: "#FF9800",
+      marginTop: 8,
+      letterSpacing: 2,
+    },
+    timerButtons: { flexDirection: "row", gap: 12 },
+    mainBtn: { flex: 4, height: 54, borderRadius: 15, overflow: "hidden" },
+    mainBtnGradient: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+    },
+    mainBtnText: { color: "white", fontWeight: "700", fontSize: 16 },
+    stopBtn: {
+      flex: 1,
+      backgroundColor: "rgba(255, 107, 107, 0.1)",
+      borderRadius: 15,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    taskHeaderRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 12,
+    },
+    sectionLabel: {
+      fontSize: 18,
+      fontWeight: "700",
+      color: colors.textDark,
+    },
+    addTaskBtn: {
+      padding: 4,
+    },
+    taskCardWrapper: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: 10,
+      gap: 8,
+    },
+    taskCard: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: colors.cardBg,
+      padding: 16,
+      borderRadius: 18,
+      elevation: 3,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+    },
+    taskCardCompleted: { opacity: 0.6 },
+    taskCardActive: {
+      borderColor: colors.primary,
+      borderWidth: 2,
+      backgroundColor: isDarkMode ? "rgba(93, 184, 154, 0.1)" : "rgba(79, 195, 247, 0.05)",
+    },
+    checkbox: {
+      width: 22,
+      height: 22,
+      borderRadius: 6,
+      borderWidth: 2,
+      borderColor: colors.primaryLight,
+      marginRight: 12,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    checkboxActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    taskContent: {
+      flex: 1,
+      gap: 6,
+    },
+    taskText: {
+      fontSize: 15,
+      fontWeight: "500",
+      color: colors.textMedium,
+    },
+    taskTextDone: {
+      textDecorationLine: "line-through",
+      color: colors.textLight,
+    },
+    taskMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    focusTimeBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+    },
+    focusTimeText: {
+      fontSize: 12,
+      fontWeight: "600",
+      color: colors.primary,
+    },
+    completionBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+    },
+    completionText: {
+      fontSize: 12,
+      fontWeight: "600",
+      color: "#FFB300",
+    },
+    deleteBtn: {
+      padding: 8,
+      backgroundColor: "rgba(255, 107, 107, 0.1)",
+      borderRadius: 12,
+    },
+    loadingContainer: {
+      paddingVertical: 40,
+      alignItems: "center",
+    },
+    emptyContainer: {
+      paddingVertical: 40,
+      alignItems: "center",
+      gap: 8,
+    },
+    emptyText: {
+      fontSize: 18,
+      fontWeight: "600",
+      color: colors.textMedium,
+      marginTop: 12,
+    },
+    emptySubtext: {
+      fontSize: 14,
+      color: colors.textLight,
+    },
+    moodModalContent: {
+      backgroundColor: colors.surface,
+      borderRadius: 30,
+      padding: 24,
+      width: "100%",
+      maxWidth: 400,
+      borderWidth: 2,
+      borderColor: colors.border,
+    },
+    moodModalSubtitle: {
+      fontSize: 14,
+      color: colors.textLight,
+      marginBottom: 20,
+    },
+    moodContainer: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginBottom: 20,
+    },
+    moodButton: {
+      width: 60,
+      height: 70,
+      borderRadius: 12,
+      backgroundColor: colors.background,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 2,
+      borderColor: "transparent",
+      gap: 4,
+    },
+    moodButtonActive: {
+      backgroundColor: colors.cardBg,
+      transform: [{ scale: 1.05 }],
+      elevation: 4,
+      borderColor: colors.primary,
+    },
+    moodEmoji: { fontSize: 28 },
+    moodLabel: {
+      fontSize: 10,
+      fontWeight: "600",
+      color: colors.textMedium,
+    },
+    moodNotesInput: {
+      backgroundColor: colors.background,
+      borderRadius: 16,
+      padding: 16,
+      fontSize: 15,
+      color: colors.textDark,
+      minHeight: 80,
+      textAlignVertical: "top",
+      marginBottom: 20,
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.5)",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 20,
+    },
+    modalContent: {
+      backgroundColor: colors.surface,
+      borderRadius: 30,
+      padding: 30,
+      width: "100%",
+      maxWidth: 340,
+      alignItems: "center",
+      borderWidth: 2,
+      borderColor: colors.border,
+    },
+    addTaskModalContent: {
+      backgroundColor: colors.surface,
+      borderRadius: 30,
+      padding: 24,
+      width: "100%",
+      maxWidth: 400,
+      borderWidth: 2,
+      borderColor: colors.border,
+    },
+    modeSelectContent: {
+      backgroundColor: colors.surface,
+      borderRadius: 30,
+      padding: 24,
+      width: "100%",
+      maxWidth: 400,
+      borderWidth: 2,
+      borderColor: colors.border,
+    },
+    taskSelectModalContent: {
+      backgroundColor: colors.surface,
+      borderRadius: 30,
+      padding: 24,
+      width: "100%",
+      maxWidth: 400,
+      maxHeight: "70%",
+      borderWidth: 2,
+      borderColor: colors.border,
+    },
+    addTaskHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 20,
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: "800",
+      color: colors.textDark,
+    },
+    taskSelectSubtitle: {
+      fontSize: 14,
+      color: colors.textLight,
+      marginBottom: 20,
+    },
+    modeOptionCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      padding: 20,
+      backgroundColor: colors.background,
+      borderRadius: 20,
+      marginBottom: 12,
+      gap: 16,
+      borderWidth: 2,
+      borderColor: "transparent",
+    },
+    modeOptionIcon: {
+      width: 60,
+      height: 60,
+      borderRadius: 30,
+      backgroundColor: colors.cardBg,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    modeOptionInfo: {
+      flex: 1,
+    },
+    modeOptionTitle: {
+      fontSize: 18,
+      fontWeight: "700",
+      color: colors.textDark,
+      marginBottom: 4,
+    },
+    modeOptionDesc: {
+      fontSize: 14,
+      color: colors.textLight,
+    },
+    taskSelectScroll: {
+      maxHeight: 400,
+    },
+    taskSelectItem: {
+      flexDirection: "row",
+      alignItems: "center",
+      padding: 16,
+      backgroundColor: colors.background,
+      borderRadius: 16,
+      marginBottom: 10,
+      gap: 12,
+    },
+    taskSelectIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.cardBg,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    taskSelectInfo: {
+      flex: 1,
+    },
+    taskSelectName: {
+      fontSize: 15,
+      fontWeight: "600",
+      color: colors.textDark,
+      marginBottom: 2,
+    },
+    taskSelectDesc: {
+      fontSize: 12,
+      color: colors.textLight,
+    },
+    taskSelectMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    inputContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 30,
+    },
+    input: {
+      fontSize: 48,
+      fontWeight: "700",
+      color: colors.primary,
+      borderBottomWidth: 3,
+      borderBottomColor: colors.accent,
+      textAlign: "center",
+      minWidth: 80,
+    },
+    inputLabel: {
+      fontSize: 18,
+      color: colors.textLight,
+      fontWeight: "600",
+    },
+    taskInput: {
+      backgroundColor: colors.background,
+      borderRadius: 16,
+      padding: 16,
+      fontSize: 16,
+      color: colors.textDark,
+      minHeight: 100,
+      textAlignVertical: "top",
+      marginBottom: 20,
+    },
+    modalButtons: {
+      flexDirection: "row",
+      gap: 15,
+      width: "100%",
+    },
+    cancelBtn: {
+      flex: 1,
+      paddingVertical: 15,
+      alignItems: "center",
+    },
+    cancelBtnText: {
+      color: colors.textLight,
+      fontSize: 16,
+      fontWeight: "600",
+    },
+    saveBtn: {
+      flex: 1,
+      borderRadius: 15,
+      overflow: "hidden",
+    },
+    saveBtnGradient: {
+      paddingVertical: 15,
+      alignItems: "center",
+      justifyContent: "center",
+      minHeight: 48,
+    },
+    saveBtnText: {
+      color: "white",
+      fontSize: 16,
+      fontWeight: "700",
+    },
+    buttonDisabled: {
+      opacity: 0.7,
+    },
+    actionMenuOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.5)",
+      justifyContent: "flex-end",
+      padding: 20,
+    },
+    actionMenuContent: {
+      backgroundColor: colors.surface,
+      borderRadius: 24,
+      padding: 20,
+      gap: 10,
+    },
+    actionMenuHeader: {
+      paddingBottom: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.background,
+      marginBottom: 5,
+    },
+    actionMenuTitle: {
+      fontSize: 18,
+      fontWeight: "700",
+      color: colors.textDark,
+      textAlign: "center",
+    },
+    actionMenuItem: {
+      flexDirection: "row",
+      alignItems: "center",
+      padding: 16,
+      backgroundColor: colors.background,
+      borderRadius: 16,
+      gap: 12,
+    },
+    actionMenuIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: isDarkMode ? "rgba(93, 184, 154, 0.15)" : "rgba(79, 195, 247, 0.1)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    actionMenuIconDanger: {
+      backgroundColor: "rgba(255, 107, 107, 0.1)",
+    },
+    actionMenuInfo: {
+      flex: 1,
+    },
+    actionMenuItemTitle: {
+      fontSize: 16,
+      fontWeight: "600",
+      color: colors.textDark,
+      marginBottom: 2,
+    },
+    actionMenuItemDesc: {
+      fontSize: 13,
+      color: colors.textLight,
+    },
+    dangerText: {
+      color: "#FF6B6B",
+    },
+    actionMenuCancelBtn: {
+      marginTop: 10,
+      padding: 16,
+      alignItems: "center",
+      backgroundColor: colors.background,
+      borderRadius: 16,
+    },
+    actionMenuCancelText: {
+      fontSize: 16,
+      fontWeight: "600",
+      color: colors.textMedium,
+    },
+  });
+
   return (
     <Background>
       <View style={styles.container}>
@@ -881,10 +1339,10 @@ export default function FocusTracker() {
           <View style={styles.headerContent}>
             <View style={styles.logoContainer}>
               <LinearGradient
-                colors={[Colors.primary, Colors.primaryLight]}
+                colors={[colors.primary, colors.primaryLight]}
                 style={styles.logoIcon}
               >
-                <Ionicons name="flash" size={24} color={Colors.white} />
+                <Ionicons name="flash" size={24} color={colors.white} />
               </LinearGradient>
               <Text style={styles.logoText}>FocusFlow</Text>
             </View>
@@ -901,7 +1359,7 @@ export default function FocusTracker() {
                 <Ionicons
                   name="menu-outline"
                   size={22}
-                  color={Colors.primary}
+                  color={colors.primary}
                 />
               </TouchableOpacity>
             </View>
@@ -921,7 +1379,7 @@ export default function FocusTracker() {
                 <Ionicons
                   name="time-outline"
                   size={20}
-                  color={Colors.primary}
+                  color={colors.primary}
                 />
                 <Text style={styles.timerTitle}>Focus Timer</Text>
               </View>
@@ -943,7 +1401,7 @@ export default function FocusTracker() {
                   <Ionicons
                     name={focusMode === "all" ? "list" : "checkmark-circle"}
                     size={14}
-                    color={Colors.primary}
+                    color={colors.primary}
                   />
                   <Text style={styles.modeBadgeText}>
                     {focusMode === "all" ? "All Tasks Mode" : "Single Task"}
@@ -954,7 +1412,7 @@ export default function FocusTracker() {
                     <Ionicons
                       name="arrow-forward"
                       size={14}
-                      color={Colors.primary}
+                      color={colors.primary}
                     />
                     <Text style={styles.activeTaskText} numberOfLines={1}>
                       {tasks.find((t) => t.id === selectedTaskId)?.text ||
@@ -985,7 +1443,7 @@ export default function FocusTracker() {
                   onPress={handleStartFocus}
                 >
                   <LinearGradient
-                    colors={[Colors.primary, Colors.primaryDark]}
+                    colors={[colors.primary, colors.primaryDark]}
                     style={styles.mainBtnGradient}
                   >
                     <Ionicons name="play" size={20} color="white" />
@@ -1001,7 +1459,7 @@ export default function FocusTracker() {
                     <LinearGradient
                       colors={
                         isPaused
-                          ? [Colors.primary, Colors.primaryDark]
+                          ? [colors.primary, colors.primaryDark]
                           : ["#FF9800", "#F57C00"]
                       }
                       style={styles.mainBtnGradient}
@@ -1034,20 +1492,20 @@ export default function FocusTracker() {
               style={styles.addTaskBtn}
               onPress={() => setShowAddTaskModal(true)}
             >
-              <Ionicons name="add-circle" size={28} color={Colors.primary} />
+              <Ionicons name="add-circle" size={28} color={colors.primary} />
             </TouchableOpacity>
           </View>
 
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={Colors.primary} />
+              <ActivityIndicator size="large" color={colors.primary} />
             </View>
           ) : tasks.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Ionicons
                 name="checkmark-done-outline"
                 size={48}
-                color={Colors.textLight}
+                color={colors.textLight}
               />
               <Text style={styles.emptyText}>No tasks yet</Text>
               <Text style={styles.emptySubtext}>
@@ -1099,7 +1557,7 @@ export default function FocusTracker() {
                           <Ionicons
                             name="time"
                             size={12}
-                            color={Colors.primary}
+                            color={colors.primary}
                           />
                           <Text style={styles.focusTimeText}>
                             {formatFocusTime(task.focus_time)}
@@ -1121,6 +1579,7 @@ export default function FocusTracker() {
             ))
           )}
         </ScrollView>
+
         {/* MODE SELECTION MODAL */}
         <Modal
           visible={showModeSelectModal}
@@ -1136,7 +1595,7 @@ export default function FocusTracker() {
                   onPress={() => setShowModeSelectModal(false)}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Ionicons name="close" size={28} color={Colors.textMedium} />
+                  <Ionicons name="close" size={28} color={colors.textMedium} />
                 </TouchableOpacity>
               </View>
 
@@ -1152,7 +1611,7 @@ export default function FocusTracker() {
                   <Ionicons
                     name="checkmark-circle"
                     size={32}
-                    color={Colors.primary}
+                    color={colors.primary}
                   />
                 </View>
                 <View style={styles.modeOptionInfo}>
@@ -1164,7 +1623,7 @@ export default function FocusTracker() {
                 <Ionicons
                   name="chevron-forward"
                   size={24}
-                  color={Colors.textLight}
+                  color={colors.textLight}
                 />
               </TouchableOpacity>
 
@@ -1173,7 +1632,7 @@ export default function FocusTracker() {
                 onPress={() => selectFocusMode("all")}
               >
                 <View style={styles.modeOptionIcon}>
-                  <Ionicons name="list" size={32} color={Colors.primaryDark} />
+                  <Ionicons name="list" size={32} color={colors.primaryDark} />
                 </View>
                 <View style={styles.modeOptionInfo}>
                   <Text style={styles.modeOptionTitle}>All Tasks</Text>
@@ -1184,7 +1643,7 @@ export default function FocusTracker() {
                 <Ionicons
                   name="chevron-forward"
                   size={24}
-                  color={Colors.textLight}
+                  color={colors.textLight}
                 />
               </TouchableOpacity>
             </View>
@@ -1206,7 +1665,7 @@ export default function FocusTracker() {
                   onPress={() => setShowTaskSelectModal(false)}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Ionicons name="close" size={28} color={Colors.textMedium} />
+                  <Ionicons name="close" size={28} color={colors.textMedium} />
                 </TouchableOpacity>
               </View>
 
@@ -1224,7 +1683,7 @@ export default function FocusTracker() {
                     <Ionicons
                       name="flash-outline"
                       size={24}
-                      color={Colors.primary}
+                      color={colors.primary}
                     />
                   </View>
                   <View style={styles.taskSelectInfo}>
@@ -1236,7 +1695,7 @@ export default function FocusTracker() {
                   <Ionicons
                     name="chevron-forward"
                     size={20}
-                    color={Colors.textLight}
+                    color={colors.textLight}
                   />
                 </TouchableOpacity>
 
@@ -1253,7 +1712,7 @@ export default function FocusTracker() {
                         <Ionicons
                           name="checkmark-circle-outline"
                           size={24}
-                          color={Colors.primaryLight}
+                          color={colors.primaryLight}
                         />
                       </View>
                       <View style={styles.taskSelectInfo}>
@@ -1276,7 +1735,7 @@ export default function FocusTracker() {
                       <Ionicons
                         name="chevron-forward"
                         size={20}
-                        color={Colors.textLight}
+                        color={colors.textLight}
                       />
                     </TouchableOpacity>
                   ))}
@@ -1305,7 +1764,7 @@ export default function FocusTracker() {
                   }}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Ionicons name="close" size={28} color={Colors.textMedium} />
+                  <Ionicons name="close" size={28} color={colors.textMedium} />
                 </TouchableOpacity>
               </View>
 
@@ -1332,7 +1791,7 @@ export default function FocusTracker() {
               <TextInput
                 style={styles.moodNotesInput}
                 placeholder="Any notes about your day? (optional)"
-                placeholderTextColor={Colors.textLight}
+                placeholderTextColor={colors.textLight}
                 value={moodNotes}
                 onChangeText={setMoodNotes}
                 multiline
@@ -1349,7 +1808,7 @@ export default function FocusTracker() {
                 disabled={selectedMood === null || savingMood}
               >
                 <LinearGradient
-                  colors={[Colors.primary, Colors.primaryLight]}
+                  colors={[colors.primary, colors.primaryLight]}
                   style={styles.saveBtnGradient}
                 >
                   {savingMood ? (
@@ -1399,7 +1858,7 @@ export default function FocusTracker() {
                   onPress={handleSetTime}
                 >
                   <LinearGradient
-                    colors={[Colors.primary, Colors.primaryLight]}
+                    colors={[colors.primary, colors.primaryLight]}
                     style={styles.saveBtnGradient}
                   >
                     <Text style={styles.saveBtnText}>Apply</Text>
@@ -1446,7 +1905,7 @@ export default function FocusTracker() {
                 }}
               >
                 <View style={styles.actionMenuIcon}>
-                  <Ionicons name="create-outline" size={24} color={Colors.primary} />
+                  <Ionicons name="create-outline" size={24} color={colors.primary} />
                 </View>
                 <View style={styles.actionMenuInfo}>
                   <Text style={styles.actionMenuItemTitle}>Edit Task</Text>
@@ -1457,7 +1916,7 @@ export default function FocusTracker() {
                 <Ionicons
                   name="chevron-forward"
                   size={20}
-                  color={Colors.textLight}
+                  color={colors.textLight}
                 />
               </TouchableOpacity>
 
@@ -1523,14 +1982,14 @@ export default function FocusTracker() {
                   }}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Ionicons name="close" size={28} color={Colors.textMedium} />
+                  <Ionicons name="close" size={28} color={colors.textMedium} />
                 </TouchableOpacity>
               </View>
 
               <TextInput
                 style={styles.taskInput}
                 placeholder="What do you want to accomplish?"
-                placeholderTextColor={Colors.textLight}
+                placeholderTextColor={colors.textLight}
                 value={editTaskText}
                 onChangeText={setEditTaskText}
                 multiline
@@ -1555,7 +2014,7 @@ export default function FocusTracker() {
                   disabled={addingTask}
                 >
                   <LinearGradient
-                    colors={[Colors.primary, Colors.primaryLight]}
+                    colors={[colors.primary, colors.primaryLight]}
                     style={styles.saveBtnGradient}
                   >
                     {addingTask ? (
@@ -1591,14 +2050,14 @@ export default function FocusTracker() {
                   }}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Ionicons name="close" size={28} color={Colors.textMedium} />
+                  <Ionicons name="close" size={28} color={colors.textMedium} />
                 </TouchableOpacity>
               </View>
 
               <TextInput
                 style={styles.taskInput}
                 placeholder="What do you want to accomplish?"
-                placeholderTextColor={Colors.textLight}
+                placeholderTextColor={colors.textLight}
                 value={newTaskText}
                 onChangeText={setNewTaskText}
                 multiline
@@ -1622,7 +2081,7 @@ export default function FocusTracker() {
                   disabled={addingTask}
                 >
                   <LinearGradient
-                    colors={[Colors.primary, Colors.primaryLight]}
+                    colors={[colors.primary, colors.primaryLight]}
                     style={styles.saveBtnGradient}
                   >
                     {addingTask ? (
@@ -1640,575 +2099,3 @@ export default function FocusTracker() {
     </Background>
   );
 }
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 15 },
-  headerContent: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  logoContainer: { flexDirection: "row", alignItems: "center", gap: 10 },
-  logoIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  logoText: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: Colors.primary,
-    letterSpacing: -0.5,
-  },
-  headerIcons: { flexDirection: "row", gap: 10 },
-  iconButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: Colors.white,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: "#E8E8E8",
-  },
-  moodButtonEmoji: {
-    fontSize: 24,
-  },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
-  pageTitle: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: Colors.textDark,
-    marginVertical: 15,
-  },
-  timerCard: {
-    backgroundColor: "rgba(255, 255, 255, 0.98)",
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 25,
-    elevation: 20,
-    shadowColor: Colors.primary,
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    borderWidth: 2,
-    borderColor: "#E0F2F1",
-  },
-  timerHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  timerTitleGroup: { flexDirection: "row", alignItems: "center", gap: 8 },
-  timerTitle: { fontSize: 16, fontWeight: "700", color: Colors.textDark },
-  editBtn: {
-    backgroundColor: Colors.bubbleMedium,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  editBtnText: { color: Colors.primaryDark, fontSize: 12, fontWeight: "800" },
-  activeInfoContainer: {
-    marginTop: 12,
-    gap: 8,
-  },
-  modeBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    alignSelf: "flex-start",
-    backgroundColor: "rgba(79, 195, 247, 0.15)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  modeBadgeText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: Colors.primary,
-  },
-  activeTaskBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "rgba(79, 195, 247, 0.1)",
-    padding: 12,
-    borderRadius: 12,
-  },
-  activeTaskText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "600",
-    color: Colors.primary,
-  },
-  taskProgress: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: Colors.primaryDark,
-  },
-  timerDisplay: { alignItems: "center", marginVertical: 20 },
-  timerText: {
-    fontSize: 64,
-    fontWeight: "300",
-    color: Colors.textDark,
-    letterSpacing: 2,
-  },
-  pausedText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#FF9800",
-    marginTop: 8,
-    letterSpacing: 2,
-  },
-  timerButtons: { flexDirection: "row", gap: 12 },
-  mainBtn: { flex: 4, height: 54, borderRadius: 15, overflow: "hidden" },
-  mainBtnGradient: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  mainBtnText: { color: "white", fontWeight: "700", fontSize: 16 },
-  stopBtn: {
-    flex: 1,
-    backgroundColor: "rgba(255, 107, 107, 0.1)",
-    borderRadius: 15,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  taskHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  sectionLabel: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: Colors.textDark,
-  },
-  addTaskBtn: {
-    padding: 4,
-  },
-  taskCardWrapper: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10,
-    gap: 8,
-  },
-  taskCard: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.9)",
-    padding: 16,
-    borderRadius: 18,
-    elevation: 3,
-    borderWidth: 1.5,
-    borderColor: "#D1EAE2",
-  },
-  taskCardCompleted: { opacity: 0.6 },
-  taskCardActive: {
-    borderColor: Colors.primary,
-    borderWidth: 2,
-    backgroundColor: "rgba(79, 195, 247, 0.05)",
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: Colors.primaryLight,
-    marginRight: 12,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  checkboxActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  taskContent: {
-    flex: 1,
-    gap: 6,
-  },
-  taskText: {
-    fontSize: 15,
-    fontWeight: "500",
-    color: Colors.textMedium,
-  },
-  taskTextDone: {
-    textDecorationLine: "line-through",
-    color: Colors.textLight,
-  },
-  taskMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  focusTimeBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  focusTimeText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: Colors.primary,
-  },
-  completionBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  completionText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#FFB300",
-  },
-  deleteBtn: {
-    padding: 8,
-    backgroundColor: "rgba(255, 107, 107, 0.1)",
-    borderRadius: 12,
-  },
-  loadingContainer: {
-    paddingVertical: 40,
-    alignItems: "center",
-  },
-  emptyContainer: {
-    paddingVertical: 40,
-    alignItems: "center",
-    gap: 8,
-  },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: Colors.textMedium,
-    marginTop: 12,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: Colors.textLight,
-  },
-  // MOOD MODAL STYLES
-  moodModalContent: {
-    backgroundColor: "white",
-    borderRadius: 30,
-    padding: 24,
-    width: "100%",
-    maxWidth: 400,
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.5)",
-  },
-  moodModalSubtitle: {
-    fontSize: 14,
-    color: Colors.textLight,
-    marginBottom: 20,
-  },
-  moodContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 20,
-  },
-  moodButton: {
-    width: 60,
-    height: 70,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "transparent",
-    gap: 4,
-  },
-  moodButtonActive: {
-    backgroundColor: "white",
-    transform: [{ scale: 1.05 }],
-    elevation: 4,
-    borderColor: Colors.primary,
-  },
-  moodEmoji: { fontSize: 28 },
-  moodLabel: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: Colors.textMedium,
-  },
-  moodNotesInput: {
-    backgroundColor: Colors.background,
-    borderRadius: 16,
-    padding: 16,
-    fontSize: 15,
-    color: Colors.textDark,
-    minHeight: 80,
-    textAlignVertical: "top",
-    marginBottom: 20,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: "white",
-    borderRadius: 30,
-    padding: 30,
-    width: "100%",
-    maxWidth: 340,
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.5)",
-  },
-  addTaskModalContent: {
-    backgroundColor: "white",
-    borderRadius: 30,
-    padding: 24,
-    width: "100%",
-    maxWidth: 400,
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.5)",
-  },
-  modeSelectContent: {
-    backgroundColor: "white",
-    borderRadius: 30,
-    padding: 24,
-    width: "100%",
-    maxWidth: 400,
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.5)",
-  },
-  taskSelectModalContent: {
-    backgroundColor: "white",
-    borderRadius: 30,
-    padding: 24,
-    width: "100%",
-    maxWidth: 400,
-    maxHeight: "70%",
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.5)",
-  },
-  addTaskHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: Colors.textDark,
-  },
-  taskSelectSubtitle: {
-    fontSize: 14,
-    color: Colors.textLight,
-    marginBottom: 20,
-  },
-  // MODE OPTION STYLES
-  modeOptionCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 20,
-    backgroundColor: Colors.background,
-    borderRadius: 20,
-    marginBottom: 12,
-    gap: 16,
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  modeOptionIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "white",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modeOptionInfo: {
-    flex: 1,
-  },
-  modeOptionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: Colors.textDark,
-    marginBottom: 4,
-  },
-  modeOptionDesc: {
-    fontSize: 14,
-    color: Colors.textLight,
-  },
-  taskSelectScroll: {
-    maxHeight: 400,
-  },
-  taskSelectItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 16,
-    marginBottom: 10,
-    gap: 12,
-  },
-  taskSelectIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "white",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  taskSelectInfo: {
-    flex: 1,
-  },
-  taskSelectName: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: Colors.textDark,
-    marginBottom: 2,
-  },
-  taskSelectDesc: {
-    fontSize: 12,
-    color: Colors.textLight,
-  },
-  taskSelectMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  inputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 30,
-  },
-  input: {
-    fontSize: 48,
-    fontWeight: "700",
-    color: Colors.primary,
-    borderBottomWidth: 3,
-    borderBottomColor: Colors.accent,
-    textAlign: "center",
-    minWidth: 80,
-  },
-  inputLabel: {
-    fontSize: 18,
-    color: Colors.textLight,
-    fontWeight: "600",
-  },
-  taskInput: {
-    backgroundColor: Colors.background,
-    borderRadius: 16,
-    padding: 16,
-    fontSize: 16,
-    color: Colors.textDark,
-    minHeight: 100,
-    textAlignVertical: "top",
-    marginBottom: 20,
-  },
-  modalButtons: {
-    flexDirection: "row",
-    gap: 15,
-    width: "100%",
-  },
-  cancelBtn: {
-    flex: 1,
-    paddingVertical: 15,
-    alignItems: "center",
-  },
-  cancelBtnText: {
-    color: Colors.textLight,
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  saveBtn: {
-    flex: 1,
-    borderRadius: 15,
-    overflow: "hidden",
-  },
-  saveBtnGradient: {
-    paddingVertical: 15,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 48,
-  },
-  saveBtnText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  actionMenuOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "flex-end",
-    padding: 20,
-  },
-  actionMenuContent: {
-    backgroundColor: "white",
-    borderRadius: 24,
-    padding: 20,
-    gap: 10,
-  },
-  actionMenuHeader: {
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.background,
-    marginBottom: 5,
-  },
-  actionMenuTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: Colors.textDark,
-    textAlign: "center",
-  },
-  actionMenuItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 16,
-    gap: 12,
-  },
-  actionMenuIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "rgba(79, 195, 247, 0.1)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  actionMenuIconDanger: {
-    backgroundColor: "rgba(255, 107, 107, 0.1)",
-  },
-  actionMenuInfo: {
-    flex: 1,
-  },
-  actionMenuItemTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: Colors.textDark,
-    marginBottom: 2,
-  },
-  actionMenuItemDesc: {
-    fontSize: 13,
-    color: Colors.textLight,
-  },
-  dangerText: {
-    color: "#FF6B6B",
-  },
-  actionMenuCancelBtn: {
-    marginTop: 10,
-    padding: 16,
-    alignItems: "center",
-    backgroundColor: Colors.background,
-    borderRadius: 16,
-  },
-  actionMenuCancelText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: Colors.textMedium,
-  },
-});

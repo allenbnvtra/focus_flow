@@ -9,30 +9,9 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import Background from '../../../components/Background';
+import Background, { Colors } from '../../../components/Background';
 import { useRouter } from 'expo-router';
-
-const Colors = {
-  primary: '#4A9B7F',
-  primaryLight: '#5DB89A',
-  primaryDark: '#2F6B56',
-  accent: '#7DD3C0',
-  background: '#F5F5F5',
-  cardDark1: '#2F6B56',
-  cardDark2: '#3D7A63',
-  cardDark3: '#4A9B7F',
-  cardLight1: '#7DD3C0',
-  cardLight2: '#9DD4BD',
-  cardLight3: '#C5E8DC',
-  textDark: '#1A3A32',
-  textMedium: '#2D5249',
-  textLight: '#5A7770',
-  white: '#FFFFFF',
-  lightGray: '#E8E8E8',
-  purple: '#A855F7',
-  purpleLight: '#C084FC',
-  purpleDark: '#7C3AED',
-};
+import { useTheme } from '../../../contexts/ThemeContext';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -46,6 +25,7 @@ interface LearningItem {
 }
 
 export default function LearningHub() {
+  const { colors, isDarkMode } = useTheme();
   const router = useRouter();
 
   const learningItems: LearningItem[] = [
@@ -99,6 +79,139 @@ export default function LearningHub() {
       router.push(item.route);
     }
   };
+
+
+  const styles = StyleSheet.create({
+    container: {
+      flex: 1,
+    },
+    header: {
+      backgroundColor: 'transparent',
+      paddingTop: Platform.OS === 'ios' ? 16 : 8,
+      paddingBottom: 16,
+      paddingHorizontal: 20,
+    },
+    headerContent: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    logoContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    logoIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: colors.primary,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 6,
+    },
+    logoText: {
+      fontSize: 24,
+      fontWeight: '700',
+      color: colors.primary,
+      letterSpacing: -0.5,
+    },
+    headerIcons: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    iconButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: 'rgba(255, 255, 255, 0.85)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: colors.primary,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.15,
+      shadowRadius: 6,
+      elevation: 3,
+      borderWidth: 1,
+      borderColor: 'rgba(74, 155, 127, 0.1)',
+    },
+    scrollView: {
+      flex: 1,
+    },
+    scrollContent: {
+      paddingHorizontal: 20,
+      paddingBottom: 100,
+    },
+    titleSection: {
+      marginBottom: 24,
+      marginTop: 8,
+    },
+    pageTitle: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: colors.textDark,
+      marginBottom: 8,
+    },
+    pageDescription: {
+      fontSize: 16,
+      color: colors.textMedium,
+      lineHeight: 24,
+    },
+    cardsContainer: {
+      gap: 16,
+    },
+    card: {
+      borderRadius: 24,
+      padding: 20,
+      flexDirection: 'row',
+      alignItems: 'center',
+      shadowColor: Colors.cardDark1,
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.35,
+      shadowRadius: 16,
+      elevation: 8,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.3)',
+      minHeight: 100,
+    },
+    iconContainer: {
+      marginRight: 16,
+    },
+    iconCircle: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: 'rgba(255, 255, 255, 0.2)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: 'rgba(0, 0, 0, 0.2)',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.2,
+      shadowRadius: 4,
+      elevation: 3,
+    },
+    cardContent: {
+      flex: 1,
+    },
+    cardTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: Colors.white,
+      marginBottom: 6,
+    },
+    cardDescription: {
+      fontSize: 14,
+      color: Colors.white,
+      lineHeight: 20,
+      fontWeight: '400',
+    },
+    arrowContainer: {
+      marginLeft: 8,
+    },
+  });
 
   return (
     <Background>
@@ -176,135 +289,3 @@ export default function LearningHub() {
     </Background>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    backgroundColor: 'transparent',
-    paddingTop: Platform.OS === 'ios' ? 16 : 8,
-    paddingBottom: 16,
-    paddingHorizontal: 20,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  logoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  logoIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  logoText: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: Colors.primary,
-    letterSpacing: -0.5,
-  },
-  headerIcons: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  iconButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: 'rgba(74, 155, 127, 0.1)',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 100,
-  },
-  titleSection: {
-    marginBottom: 24,
-    marginTop: 8,
-  },
-  pageTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: Colors.textDark,
-    marginBottom: 8,
-  },
-  pageDescription: {
-    fontSize: 16,
-    color: Colors.textMedium,
-    lineHeight: 24,
-  },
-  cardsContainer: {
-    gap: 16,
-  },
-  card: {
-    borderRadius: 24,
-    padding: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: Colors.cardDark1,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    elevation: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-    minHeight: 100,
-  },
-  iconContainer: {
-    marginRight: 16,
-  },
-  iconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: 'rgba(0, 0, 0, 0.2)',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  cardContent: {
-    flex: 1,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.white,
-    marginBottom: 6,
-  },
-  cardDescription: {
-    fontSize: 14,
-    color: Colors.white,
-    lineHeight: 20,
-    fontWeight: '400',
-  },
-  arrowContainer: {
-    marginLeft: 8,
-  },
-});

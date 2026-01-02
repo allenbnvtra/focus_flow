@@ -4,11 +4,14 @@ import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'react-native';
 import { AuthProvider } from '../contexts/AuthContext';
+import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 
 SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout() {
+// Inner component that can access theme
+function RootLayoutContent() {
   const [fontsLoaded] = useFonts({});
+  const { colors, isDarkMode } = useTheme();
 
   useEffect(() => {
     if (fontsLoaded) {
@@ -19,15 +22,25 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <AuthProvider>
-      <StatusBar barStyle="dark-content" />
+    <>
+      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: '#FFFFFF' },
+          contentStyle: { backgroundColor: colors.background },
           animation: 'fade',
         }}
       />
-    </AuthProvider>
+    </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <AuthProvider>
+        <RootLayoutContent />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

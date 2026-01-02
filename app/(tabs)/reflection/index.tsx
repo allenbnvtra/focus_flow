@@ -12,11 +12,12 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import Background, { Colors } from "../../../components/Background";
+import Background from "../../../components/Background";
 import { useAuth } from "../../../contexts/AuthContext";
 import { supabase } from "../../../lib/supabase";
 import { useRouter } from "expo-router";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { useTheme } from "../../../contexts/ThemeContext";
 
 interface QuizQuestion {
   id: string;
@@ -31,6 +32,7 @@ interface QuizQuestion {
 }
 
 export default function Reflection() {
+  const { colors, isDarkMode } = useTheme();
   const { user } = useAuth();
   const router = useRouter();
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
@@ -241,6 +243,73 @@ export default function Reflection() {
     setShowResults(false);
   };
 
+  const styles = StyleSheet.create({
+    container: { flex: 1 },
+    header: { paddingHorizontal: 20, paddingTop: Platform.OS === "ios" ? 60 : 20, paddingBottom: 15 },
+    headerContent: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+    logoContainer: { flexDirection: "row", alignItems: "center", gap: 10 },
+    logoIcon: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+    logoText: { fontSize: 24, fontWeight: "700", color: colors.primary, letterSpacing: -0.5 },
+    headerIcons: { flexDirection: "row", gap: 10 },
+    iconButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: "rgba(255, 255, 255, 0.9)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(74, 155, 127, 0.1)" },
+    adminButton: { backgroundColor: colors.primary, borderColor: colors.primaryDark },
+    scrollView: { flex: 1 },
+    scrollContent: { paddingHorizontal: 20, paddingBottom: 120 },
+    titleSection: { marginBottom: 20, marginTop: 10 },
+    pageTitle: { fontSize: 28, fontWeight: "800", color: colors.textDark },
+    pageSubtitle: { fontSize: 16, color: colors.textLight, marginTop: 4 },
+    loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
+    loadingText: { fontSize: 16, color: colors.textMedium, fontWeight: "600" },
+    emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center", paddingVertical: 60, gap: 12 },
+    emptyText: { fontSize: 20, fontWeight: "700", color: colors.textDark, marginTop: 16 },
+    emptySubtext: { fontSize: 15, color: colors.textLight, textAlign: "center", paddingHorizontal: 40 },
+    progressContainer: { marginBottom: 24 },
+    progressInfo: { flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
+    progressText: { fontSize: 15, fontWeight: "600", color: colors.textMedium },
+    scoreText: { fontSize: 15, fontWeight: "700", color: colors.primary },
+    progressBarBg: { height: 8, backgroundColor: "rgba(74, 155, 127, 0.2)", borderRadius: 4, overflow: "hidden" },
+    progressBarFill: { height: "100%", backgroundColor: colors.primary, borderRadius: 4 },
+    questionCard: { borderRadius: 32, padding: 24, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.25)", elevation: 10, shadowColor: "#1A3A32", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.3, shadowRadius: 16, marginBottom: 24 },
+    cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
+    iconBadge: { width: 38, height: 38, borderRadius: 12, backgroundColor: "rgba(255,255, 255, 0.2)", alignItems: "center", justifyContent: "center" },
+    difficultyBadge: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: "rgba(255, 255, 255, 0.25)", borderRadius: 12 },
+    difficultyText: { fontSize: 12, fontWeight: "700", color: colors.white, textTransform: "uppercase" },
+    questionText: { fontSize: 20, fontWeight: "700", color: colors.white, marginBottom: 24, lineHeight: 28 },
+    optionsContainer: { gap: 12 },
+    optionButton: { backgroundColor: "rgba(255, 255, 255, 0.95)", borderRadius: 16, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 2, borderColor: "transparent" },
+    optionButtonSelected: { backgroundColor: "rgba(255, 255, 255, 1)", borderRadius: 16, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 2, borderColor: colors.primary },
+    optionButtonCorrect: { backgroundColor: "rgba(76, 175, 80, 0.1)", borderRadius: 16, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 2, borderColor: "#4CAF50" },
+    optionButtonWrong: { backgroundColor: "rgba(255, 107, 107, 0.1)", borderRadius: 16, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 2, borderColor: "#FF6B6B" },
+    optionText: { fontSize: 16, fontWeight: "600", color: "#1A3A32", flex: 1 },
+    explanationContainer: { marginTop: 20, padding: 16, backgroundColor: "rgba(255, 255, 255, 0.95)", borderRadius: 16 },
+    explanationHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+    explanationTitle: { fontSize: 16, fontWeight: "700", color: "#1A3A32" },
+    explanationText: { fontSize: 14, color: "#2D5249", lineHeight: 20 },
+    navigationContainer: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
+    navButton: { flexDirection: "row", alignItems: "center", gap: 6, padding: 12 },
+    navButtonDisabled: { opacity: 0.4 },
+    navButtonText: { fontSize: 16, fontWeight: "600", color: colors.primary },
+    navButtonTextDisabled: { color: colors.textLight },
+    nextButton: { borderRadius: 16, overflow: "hidden" },
+    nextButtonGradient: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 14, paddingHorizontal: 24 },
+    nextButtonText: { fontSize: 16, fontWeight: "700", color: colors.white },
+    modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 },
+    resultsModal: { backgroundColor: colors.white, borderRadius: 32, width: "100%", maxWidth: 400, overflow: "hidden" },
+    resultsHeader: { padding: 32, alignItems: "center", gap: 12 },
+    resultsTitle: { fontSize: 24, fontWeight: "800", color: colors.white },
+    resultsBody: { padding: 24, alignItems: "center" },
+    resultsScore: { fontSize: 18, fontWeight: "600", color: colors.textMedium, marginBottom: 8 },
+    resultsPercentage: { fontSize: 48, fontWeight: "800", color: colors.primary, marginBottom: 20 },
+    resultsFeedback: { backgroundColor: colors.background, padding: 16, borderRadius: 16, marginBottom: 24, width: "100%" },
+    feedbackText: { fontSize: 16, fontWeight: "600", color: colors.textDark, textAlign: "center" },
+    resultsActions: { flexDirection: "row", gap: 12, width: "100%" },
+    retryButton: { flex: 1, borderRadius: 16, overflow: "hidden" },
+    retryButtonGradient: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16 },
+    retryButtonText: { fontSize: 16, fontWeight: "700", color: colors.white },
+    doneButton: { flex: 1, paddingVertical: 16, borderRadius: 16, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" },
+    doneButtonText: { fontSize: 16, fontWeight: "700", color: colors.textDark },
+  });
+
   if (loading) {
     return (
       <Background>
@@ -249,17 +318,17 @@ export default function Reflection() {
             <View style={styles.headerContent}>
               <View style={styles.logoContainer}>
                 <LinearGradient
-                  colors={[Colors.primary, Colors.primaryLight]}
+                  colors={[colors.primary, colors.primaryLight]}
                   style={styles.logoIcon}
                 >
-                  <Ionicons name="flash" size={24} color={Colors.white} />
+                  <Ionicons name="flash" size={24} color={colors.white} />
                 </LinearGradient>
                 <Text style={styles.logoText}>FocusFlow</Text>
               </View>
             </View>
           </View>
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={Colors.primary} />
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingText}>Loading questions...</Text>
           </View>
         </View>
@@ -275,10 +344,10 @@ export default function Reflection() {
             <View style={styles.headerContent}>
               <View style={styles.logoContainer}>
                 <LinearGradient
-                  colors={[Colors.primary, Colors.primaryLight]}
+                  colors={[colors.primary, colors.primaryLight]}
                   style={styles.logoIcon}
                 >
-                  <Ionicons name="flash" size={24} color={Colors.white} />
+                  <Ionicons name="flash" size={24} color={colors.white} />
                 </LinearGradient>
                 <Text style={styles.logoText}>FocusFlow</Text>
               </View>
@@ -288,14 +357,14 @@ export default function Reflection() {
                     style={[styles.iconButton, styles.adminButton]}
                     onPress={() => router.push("/reflection/admin-questions")}
                   >
-                    <Ionicons name="add-circle" size={22} color={Colors.white} />
+                    <Ionicons name="add-circle" size={22} color={colors.white} />
                   </TouchableOpacity>
                 )}
               </View>
             </View>
           </View>
           <View style={styles.emptyContainer}>
-            <Ionicons name="bulb-outline" size={64} color={Colors.textLight} />
+            <Ionicons name="bulb-outline" size={64} color={colors.textLight} />
             <Text style={styles.emptyText}>No questions available</Text>
             <Text style={styles.emptySubtext}>
               {isAdmin
@@ -318,10 +387,10 @@ export default function Reflection() {
           <View style={styles.headerContent}>
             <View style={styles.logoContainer}>
               <LinearGradient
-                colors={[Colors.primary, Colors.primaryLight]}
+                colors={[colors.primary, colors.primaryLight]}
                 style={styles.logoIcon}
               >
-                <Ionicons name="flash" size={24} color={Colors.white} />
+                <Ionicons name="flash" size={24} color={colors.white} />
               </LinearGradient>
               <Text style={styles.logoText}>FocusFlow</Text>
             </View>
@@ -331,7 +400,7 @@ export default function Reflection() {
                   style={[styles.iconButton, styles.adminButton]}
                   onPress={() => router.push("/reflection/admin-questions")}
                 >
-                  <Ionicons name="settings-outline" size={22} color={Colors.white} />
+                  <Ionicons name="settings-outline" size={22} color={colors.white} />
                 </TouchableOpacity>
               )}
             </View>
@@ -370,7 +439,7 @@ export default function Reflection() {
           >
             <View style={styles.cardHeader}>
               <View style={styles.iconBadge}>
-                <Ionicons name="bulb-outline" size={20} color={Colors.white} />
+                <Ionicons name="bulb-outline" size={20} color={colors.white} />
               </View>
               <View style={styles.difficultyBadge}>
                 <Text style={styles.difficultyText}>{currentQuestion.difficulty}</Text>
@@ -457,7 +526,7 @@ export default function Reflection() {
               <Ionicons
                 name="chevron-back"
                 size={24}
-                color={currentQuestionIndex === 0 ? Colors.textLight : Colors.primary}
+                color={currentQuestionIndex === 0 ? colors.textLight : colors.primary}
               />
               <Text
                 style={[
@@ -472,13 +541,13 @@ export default function Reflection() {
             {showExplanation && (
               <TouchableOpacity style={styles.nextButton} onPress={handleNextQuestion}>
                 <LinearGradient
-                  colors={[Colors.primary, Colors.primaryDark]}
+                  colors={[colors.primary, colors.primaryDark]}
                   style={styles.nextButtonGradient}
                 >
                   <Text style={styles.nextButtonText}>
                     {currentQuestionIndex === questions.length - 1 ? "Finish" : "Next"}
                   </Text>
-                  <Ionicons name="chevron-forward" size={20} color={Colors.white} />
+                  <Ionicons name="chevron-forward" size={20} color={colors.white} />
                 </LinearGradient>
               </TouchableOpacity>
             )}
@@ -494,10 +563,10 @@ export default function Reflection() {
           <View style={styles.modalOverlay}>
             <View style={styles.resultsModal}>
               <LinearGradient
-                colors={[Colors.primary, Colors.primaryDark]}
+                colors={[colors.primary, colors.primaryDark]}
                 style={styles.resultsHeader}
               >
-                <Ionicons name="trophy" size={48} color={Colors.white} />
+                <Ionicons name="trophy" size={48} color={colors.white} />
                 <Text style={styles.resultsTitle}>Quiz Complete!</Text>
               </LinearGradient>
 
@@ -541,10 +610,10 @@ export default function Reflection() {
                     }}
                   >
                     <LinearGradient
-                      colors={[Colors.primary, Colors.primaryDark]}
+                      colors={[colors.primary, colors.primaryDark]}
                       style={styles.retryButtonGradient}
                     >
-                      <Ionicons name="refresh" size={20} color={Colors.white} />
+                      <Ionicons name="refresh" size={20} color={colors.white} />
                       <Text style={styles.retryButtonText}>Try Again</Text>
                     </LinearGradient>
                   </TouchableOpacity>
@@ -567,70 +636,3 @@ export default function Reflection() {
     </Background>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { paddingHorizontal: 20, paddingTop: Platform.OS === "ios" ? 60 : 20, paddingBottom: 15 },
-  headerContent: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  logoContainer: { flexDirection: "row", alignItems: "center", gap: 10 },
-  logoIcon: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  logoText: { fontSize: 24, fontWeight: "700", color: Colors.primary, letterSpacing: -0.5 },
-  headerIcons: { flexDirection: "row", gap: 10 },
-  iconButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: "rgba(255, 255, 255, 0.9)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(74, 155, 127, 0.1)" },
-  adminButton: { backgroundColor: Colors.primary, borderColor: Colors.primaryDark },
-  scrollView: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 120 },
-  titleSection: { marginBottom: 20, marginTop: 10 },
-  pageTitle: { fontSize: 28, fontWeight: "800", color: Colors.textDark },
-  pageSubtitle: { fontSize: 16, color: Colors.textLight, marginTop: 4 },
-  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
-  loadingText: { fontSize: 16, color: Colors.textMedium, fontWeight: "600" },
-  emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center", paddingVertical: 60, gap: 12 },
-  emptyText: { fontSize: 20, fontWeight: "700", color: Colors.textDark, marginTop: 16 },
-  emptySubtext: { fontSize: 15, color: Colors.textLight, textAlign: "center", paddingHorizontal: 40 },
-  progressContainer: { marginBottom: 24 },
-  progressInfo: { flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
-  progressText: { fontSize: 15, fontWeight: "600", color: Colors.textMedium },
-  scoreText: { fontSize: 15, fontWeight: "700", color: Colors.primary },
-  progressBarBg: { height: 8, backgroundColor: "rgba(74, 155, 127, 0.2)", borderRadius: 4, overflow: "hidden" },
-  progressBarFill: { height: "100%", backgroundColor: Colors.primary, borderRadius: 4 },
-  questionCard: { borderRadius: 32, padding: 24, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.25)", elevation: 10, shadowColor: "#1A3A32", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.3, shadowRadius: 16, marginBottom: 24 },
-  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
-  iconBadge: { width: 38, height: 38, borderRadius: 12, backgroundColor: "rgba(255,255, 255, 0.2)", alignItems: "center", justifyContent: "center" },
-  difficultyBadge: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: "rgba(255, 255, 255, 0.25)", borderRadius: 12 },
-  difficultyText: { fontSize: 12, fontWeight: "700", color: Colors.white, textTransform: "uppercase" },
-  questionText: { fontSize: 20, fontWeight: "700", color: Colors.white, marginBottom: 24, lineHeight: 28 },
-  optionsContainer: { gap: 12 },
-  optionButton: { backgroundColor: "rgba(255, 255, 255, 0.95)", borderRadius: 16, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 2, borderColor: "transparent" },
-  optionButtonSelected: { backgroundColor: "rgba(255, 255, 255, 1)", borderRadius: 16, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 2, borderColor: Colors.primary },
-  optionButtonCorrect: { backgroundColor: "rgba(76, 175, 80, 0.1)", borderRadius: 16, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 2, borderColor: "#4CAF50" },
-  optionButtonWrong: { backgroundColor: "rgba(255, 107, 107, 0.1)", borderRadius: 16, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 2, borderColor: "#FF6B6B" },
-  optionText: { fontSize: 16, fontWeight: "600", color: "#1A3A32", flex: 1 },
-  explanationContainer: { marginTop: 20, padding: 16, backgroundColor: "rgba(255, 255, 255, 0.95)", borderRadius: 16 },
-  explanationHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
-  explanationTitle: { fontSize: 16, fontWeight: "700", color: "#1A3A32" },
-  explanationText: { fontSize: 14, color: "#2D5249", lineHeight: 20 },
-  navigationContainer: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
-  navButton: { flexDirection: "row", alignItems: "center", gap: 6, padding: 12 },
-  navButtonDisabled: { opacity: 0.4 },
-  navButtonText: { fontSize: 16, fontWeight: "600", color: Colors.primary },
-  navButtonTextDisabled: { color: Colors.textLight },
-  nextButton: { borderRadius: 16, overflow: "hidden" },
-  nextButtonGradient: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 14, paddingHorizontal: 24 },
-  nextButtonText: { fontSize: 16, fontWeight: "700", color: Colors.white },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 },
-  resultsModal: { backgroundColor: Colors.white, borderRadius: 32, width: "100%", maxWidth: 400, overflow: "hidden" },
-  resultsHeader: { padding: 32, alignItems: "center", gap: 12 },
-  resultsTitle: { fontSize: 24, fontWeight: "800", color: Colors.white },
-  resultsBody: { padding: 24, alignItems: "center" },
-  resultsScore: { fontSize: 18, fontWeight: "600", color: Colors.textMedium, marginBottom: 8 },
-  resultsPercentage: { fontSize: 48, fontWeight: "800", color: Colors.primary, marginBottom: 20 },
-  resultsFeedback: { backgroundColor: Colors.background, padding: 16, borderRadius: 16, marginBottom: 24, width: "100%" },
-  feedbackText: { fontSize: 16, fontWeight: "600", color: Colors.textDark, textAlign: "center" },
-  resultsActions: { flexDirection: "row", gap: 12, width: "100%" },
-  retryButton: { flex: 1, borderRadius: 16, overflow: "hidden" },
-  retryButtonGradient: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16 },
-  retryButtonText: { fontSize: 16, fontWeight: "700", color: Colors.white },
-  doneButton: { flex: 1, paddingVertical: 16, borderRadius: 16, backgroundColor: Colors.background, alignItems: "center", justifyContent: "center" },
-  doneButtonText: { fontSize: 16, fontWeight: "700", color: Colors.textDark },
-});

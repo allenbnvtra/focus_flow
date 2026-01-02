@@ -2,14 +2,7 @@ import { Tabs, usePathname } from 'expo-router';
 import React from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-
-const Colors = {
-  primary: '#00DF9A',
-  surface: '#121212',
-  textInactive: '#666666',
-  indicator: 'rgba(255, 255, 255, 0.08)',
-  border: 'rgba(255, 255, 255, 0.1)',
-};
+import { Colors } from '../../components/Background';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 

@@ -15,6 +15,33 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import Background, { Colors } from '../../../components/Background';
 import { useAuth } from '../../../contexts/AuthContext';
+import { useTheme } from '../../../contexts/ThemeContext';
+
+// Helper hook that safely uses theme context with fallback
+const useSafeTheme = () => {
+  try {
+    return useTheme();
+  } catch {
+    return {
+      isDarkMode: false,
+      toggleDarkMode: () => {},
+      colors: {
+        primary: '#4A9B7F',
+        primaryLight: '#5DB89A',
+        primaryDark: '#3A7D66',
+        accent: '#7DD3C0',
+        background: '#F8FFFE',
+        textDark: '#1A3A32',
+        textLight: '#5A7770',
+        surface: '#FFFFFF',
+        border: '#D1EAE2',
+        settingsBg: 'rgba(255, 255, 255, 0.96)',
+        settingsBorder: '#D1EAE2',
+        iconBg: '#F0F9F6',
+      }
+    };
+  }
+};
 
 interface SettingItemProps {
   icon: string;
@@ -26,54 +53,52 @@ interface SettingItemProps {
   isLast?: boolean;
 }
 
-const SettingItem = ({ icon, label, value, onValueChange, onPress, type, isLast }: SettingItemProps) => (
-  <TouchableOpacity 
-    style={[styles.settingItem, isLast && { borderBottomWidth: 0 }]}
-    disabled={type === 'toggle'}
-    onPress={onPress}
-    activeOpacity={0.7}
-  >
-    <View style={styles.settingLeft}>
-      <View style={styles.iconBg}>
-        <Ionicons name={icon as any} size={20} color={Colors.primary} />
+const SettingItem = ({ icon, label, value, onValueChange, onPress, type, isLast }: SettingItemProps) => {
+  const { colors } = useSafeTheme();
+  
+  return (
+    <TouchableOpacity 
+      style={[styles.settingItem, isLast && { borderBottomWidth: 0 }, { borderBottomColor: colors.border }]}
+      disabled={type === 'toggle'}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <View style={styles.settingLeft}>
+        <View style={[styles.iconBg, { backgroundColor: colors.iconBg }]}>
+          <Ionicons name={icon as any} size={20} color={colors.primary} />
+        </View>
+        <Text style={[styles.settingLabel, { color: colors.textDark }]}>{label}</Text>
       </View>
-      <Text style={styles.settingLabel}>{label}</Text>
-    </View>
-    {type === 'toggle' ? (
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: '#D1D1D1', true: Colors.accent }}
-        thumbColor={value ? Colors.primary : '#F4F4F4'}
-      />
-    ) : (
-      <Ionicons name="chevron-forward" size={20} color={Colors.textLight} />
-    )}
-  </TouchableOpacity>
-);
+      {type === 'toggle' ? (
+        <Switch
+          value={value}
+          onValueChange={onValueChange}
+          trackColor={{ false: '#D1D1D1', true: colors.accent }}
+          thumbColor={value ? colors.primary : '#F4F4F4'}
+        />
+      ) : (
+        <Ionicons name="chevron-forward" size={20} color={colors.textLight} />
+      )}
+    </TouchableOpacity>
+  );
+};
 
 export default function Settings() {
   const router = useRouter();
   const { user, logout, isLoading: authLoading, updateUserProfile } = useAuth();
+  const { isDarkMode, toggleDarkMode, colors } = useSafeTheme();
   const [loading, setLoading] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [highContrast, setHighContrast] = useState(false);
 
-  // Load user preferences from user object if they exist
   useEffect(() => {
     if (user) {
-      // You can add preference fields to your users table if needed
-      // For now, these will just be local state
       console.log('User loaded:', user);
     }
   }, [user]);
 
-  // Update preferences in database
-  const updatePreferences = async (preferences: { darkMode?: boolean; notifications?: boolean; highContrast?: boolean }) => {
+  const updatePreferences = async (preferences: { notifications?: boolean; highContrast?: boolean }) => {
     try {
-      // If you want to persist preferences, add a preferences JSON column to your users table
-      // await updateUserProfile({ preferences: { darkMode, notifications, highContrast, ...preferences } });
       console.log('Preferences updated:', preferences);
     } catch (error: any) {
       console.error('Error updating preferences:', error);
@@ -81,12 +106,11 @@ export default function Settings() {
     }
   };
 
-  const handleDarkModeToggle = async (value: boolean) => {
-    setDarkMode(value);
-    await updatePreferences({ darkMode: value });
+  const handleDarkModeToggle = async () => {
+    toggleDarkMode();
     Alert.alert(
       'Dark Mode',
-      value ? 'Dark mode enabled. This will be applied across the app.' : 'Dark mode disabled.',
+      !isDarkMode ? 'Dark mode enabled. Enjoy your new theme!' : 'Dark mode disabled. Switched to light theme.',
       [{ text: 'OK' }]
     );
   };
@@ -149,7 +173,6 @@ export default function Settings() {
         { 
           text: 'Change Password', 
           onPress: () => {
-            // Implement password reset flow
             Alert.alert(
               'Change Password',
               'A password reset link will be sent to your email.',
@@ -158,7 +181,6 @@ export default function Settings() {
                 { 
                   text: 'Send Link',
                   onPress: () => {
-                    // Implement Supabase password reset
                     console.log('Send password reset email');
                     Alert.alert('Success', 'Password reset link sent to your email.');
                   }
@@ -238,26 +260,24 @@ export default function Settings() {
     );
   };
 
-  // Show loading state while auth is initializing
   if (authLoading || loading) {
     return (
       <Background>
         <View style={[styles.container, styles.centerContent]}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.loadingText}>Loading your settings...</Text>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textLight }]}>Loading your settings...</Text>
         </View>
       </Background>
     );
   }
 
-  // Fallback if no user (shouldn't happen in protected route)
   if (!user) {
     return (
       <Background>
         <View style={[styles.container, styles.centerContent]}>
-          <Text style={styles.errorText}>No user data available</Text>
+          <Text style={[styles.errorText, { color: colors.textLight }]}>No user data available</Text>
           <TouchableOpacity 
-            style={styles.retryButton}
+            style={[styles.retryButton, { backgroundColor: colors.primary }]}
             onPress={() => router.replace('/auth/login')}
           >
             <Text style={styles.retryButtonText}>Go to Login</Text>
@@ -267,7 +287,6 @@ export default function Settings() {
     );
   }
 
-  // Generate avatar URL with user's name
   const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || 'User')}&background=2F6B56&color=fff&size=128&bold=true`;
 
   return (
@@ -279,15 +298,15 @@ export default function Settings() {
           <View style={styles.headerContent}>
             <View style={styles.logoContainer}>
               <LinearGradient
-                colors={[Colors.primary, Colors.primaryLight]}
+                colors={[colors.primary, colors.primaryLight]}
                 style={styles.logoIcon}
               >
-                <Ionicons name="flash" size={24} color={Colors.white} />
+                <Ionicons name="flash" size={24} color="#FFFFFF" />
               </LinearGradient>
-              <Text style={styles.logoText}>FocusFlow</Text>
+              <Text style={[styles.logoText, { color: colors.primary }]}>FocusFlow</Text>
             </View>
-            <TouchableOpacity style={styles.iconButton} onPress={handleMenu}>
-              <Ionicons name="menu-outline" size={22} color={Colors.primary} />
+            <TouchableOpacity style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleMenu}>
+              <Ionicons name="menu-outline" size={22} color={colors.primary} />
             </TouchableOpacity>
           </View>
         </View>
@@ -296,7 +315,7 @@ export default function Settings() {
           showsVerticalScrollIndicator={false} 
           contentContainerStyle={styles.scrollContent}
         >
-          <Text style={styles.pageTitle}>Settings</Text>
+          <Text style={[styles.pageTitle, { color: colors.textDark }]}>Settings</Text>
 
           {/* USER PROFILE CARD */}
           <TouchableOpacity onPress={handleEditProfile} activeOpacity={0.9}>
@@ -330,13 +349,13 @@ export default function Settings() {
           </TouchableOpacity>
 
           {/* DISPLAY & EXPERIENCE */}
-          <Text style={styles.sectionTitle}>Display & Experience</Text>
-          <View style={styles.settingsGroup}>
+          <Text style={[styles.sectionTitle, { color: colors.textLight }]}>Display & Experience</Text>
+          <View style={[styles.settingsGroup, { backgroundColor: colors.settingsBg, borderColor: colors.settingsBorder }]}>
             <SettingItem 
               icon="moon-outline" 
               label="Dark Mode" 
               type="toggle" 
-              value={darkMode} 
+              value={isDarkMode} 
               onValueChange={handleDarkModeToggle} 
             />
             <SettingItem 
@@ -350,8 +369,8 @@ export default function Settings() {
           </View>
 
           {/* PRIVACY & SECURITY */}
-          <Text style={styles.sectionTitle}>Privacy & Security</Text>
-          <View style={styles.settingsGroup}>
+          <Text style={[styles.sectionTitle, { color: colors.textLight }]}>Privacy & Security</Text>
+          <View style={[styles.settingsGroup, { backgroundColor: colors.settingsBg, borderColor: colors.settingsBorder }]}>
             <SettingItem 
               icon="notifications-outline" 
               label="Notifications" 
@@ -375,8 +394,8 @@ export default function Settings() {
           </View>
 
           {/* OTHER */}
-          <Text style={styles.sectionTitle}>Other</Text>
-          <View style={styles.settingsGroup}>
+          <Text style={[styles.sectionTitle, { color: colors.textLight }]}>Other</Text>
+          <View style={[styles.settingsGroup, { backgroundColor: colors.settingsBg, borderColor: colors.settingsBorder }]}>
             <SettingItem 
               icon="help-circle-outline" 
               label="Help & Support" 
@@ -414,10 +433,9 @@ export default function Settings() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centerContent: { justifyContent: 'center', alignItems: 'center' },
-  loadingText: { marginTop: 16, fontSize: 16, color: Colors.textLight },
-  errorText: { fontSize: 18, color: Colors.textLight, marginBottom: 20 },
+  loadingText: { marginTop: 16, fontSize: 16 },
+  errorText: { fontSize: 18, marginBottom: 20 },
   retryButton: { 
-    backgroundColor: Colors.primary, 
     paddingHorizontal: 24, 
     paddingVertical: 12, 
     borderRadius: 12 
@@ -427,14 +445,14 @@ const styles = StyleSheet.create({
   headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   logoContainer: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   logoIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  logoText: { fontSize: 24, fontWeight: '700', color: Colors.primary, letterSpacing: -0.5 },
+  logoText: { fontSize: 24, fontWeight: '700', letterSpacing: -0.5 },
   iconButton: { 
-    width: 44, height: 44, borderRadius: 12, backgroundColor: 'white', 
-    alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#E8E8E8' 
+    width: 44, height: 44, borderRadius: 12, 
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 
   },
 
   scrollContent: { paddingHorizontal: 20, paddingBottom: 120 },
-  pageTitle: { fontSize: 28, fontWeight: '800', color: Colors.textDark, marginVertical: 15 },
+  pageTitle: { fontSize: 28, fontWeight: '800', marginVertical: 15 },
   
   profileCard: {
     borderRadius: 28,
@@ -465,25 +483,23 @@ const styles = StyleSheet.create({
   userTypeText: { fontSize: 11, fontWeight: '700', color: 'white', letterSpacing: 0.5 },
   editBadge: { width: 32, height: 32, borderRadius: 10, backgroundColor: 'white', alignItems: 'center', justifyContent: 'center' },
 
-  sectionTitle: { fontSize: 13, fontWeight: '800', color: Colors.textLight, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12, marginLeft: 4 },
+  sectionTitle: { fontSize: 13, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12, marginLeft: 4 },
   settingsGroup: { 
-    backgroundColor: 'rgba(255, 255, 255, 0.96)', 
     borderRadius: 24, 
     marginBottom: 25,
     borderWidth: 2, 
-    borderColor: '#D1EAE2',
     overflow: 'hidden',
   },
   settingItem: { 
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', 
-    padding: 18, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' 
+    padding: 18, borderBottomWidth: 1 
   },
   settingLeft: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   iconBg: { 
     width: 38, height: 38, borderRadius: 12, 
-    backgroundColor: '#F0F9F6', alignItems: 'center', justifyContent: 'center' 
+    alignItems: 'center', justifyContent: 'center' 
   },
-  settingLabel: { fontSize: 16, fontWeight: '600', color: Colors.textDark },
+  settingLabel: { fontSize: 16, fontWeight: '600' },
 
   logoutBtn: { 
     flexDirection: 'row', 

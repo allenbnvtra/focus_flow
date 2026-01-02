@@ -14,35 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
-import Background from '../../../components/Background';
-
-const Colors = {
-  primary: '#4A9B7F',
-  primaryLight: '#5DB89A',
-  primaryDark: '#2F6B56',
-  accent: '#7DD3C0',
-  background: '#F5F5F5',
-  cardDark1: '#2F6B56',
-  cardDark2: '#3D7A63',
-  cardDark3: '#4A9B7F',
-  cardLight1: '#7DD3C0',
-  cardLight2: '#9DD4BD',
-  cardLight3: '#C5E8DC',
-  textDark: '#1A3A32',
-  textMedium: '#2D5249',
-  textLight: '#5A7770',
-  white: '#FFFFFF',
-  pink: '#E8A5A5',
-  pinkLight: '#F5C5C5',
-  blue: '#A5C7E8',
-  blueLight: '#C5DDEF',
-  green: '#7DD3C0',
-  greenLight: '#9DD4BD',
-  purple: '#B8A5E8',
-  purpleLight: '#D5C5F5',
-  orange: '#E8C5A5',
-  orangeLight: '#F5DFC5',
-};
+import Background, { Colors } from '../../../components/Background';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 

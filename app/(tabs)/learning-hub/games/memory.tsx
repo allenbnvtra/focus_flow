@@ -13,25 +13,9 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { Colors } from '../../../../components/Background';
 
 const { width } = Dimensions.get('window');
-
-const Colors = {
-  red: '#EF4444',
-  redActive: '#FCA5A5',
-  blue: '#3B82F6',
-  blueActive: '#93C5FD',
-  green: '#10B981',
-  greenActive: '#6EE7B7',
-  yellow: '#FBBF24',
-  yellowActive: '#FDE68A',
-  background: ['#0F172A', '#581C87', '#0F172A'] as const,
-  cardBg: 'rgba(255, 255, 255, 0.1)',
-  textPrimary: '#FFFFFF',
-  textSecondary: '#C4B5FD',
-  purple: '#A855F7',
-  pink: '#EC4899',
-};
 
 type GameColor = 'red' | 'blue' | 'green' | 'yellow';
 
@@ -201,7 +185,7 @@ export default function MemoryGame() {
   };
 
   return (
-    <LinearGradient colors={Colors.background} style={styles.container}>
+    <LinearGradient colors={Colors.gradientBackground} style={styles.container}>
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
