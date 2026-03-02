@@ -1347,21 +1347,14 @@ export default function FocusTracker() {
               <Text style={styles.logoText}>FocusFlow</Text>
             </View>
             <View style={styles.headerIcons}>
-              <TouchableOpacity
+              {/* <TouchableOpacity
                 style={styles.iconButton}
                 onPress={() => setShowMoodModal(true)}
               >
                 <Text style={styles.moodButtonEmoji}>
                   {todayMood ? getMoodEmoji(todayMood.mood_value) : "😊"}
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconButton}>
-                <Ionicons
-                  name="menu-outline"
-                  size={22}
-                  color={colors.primary}
-                />
-              </TouchableOpacity>
+              </TouchableOpacity> */}
             </View>
           </View>
         </View>

@@ -277,20 +277,9 @@ export default function EditProfile() {
         >
           {/* AVATAR SECTION */}
           <View style={styles.avatarSection}>
-            <TouchableOpacity
-              onPress={handleChangeAvatar}
-              activeOpacity={0.8}
-            >
-              <View style={styles.avatarContainer}>
-                <Image source={{ uri: avatarUrl }} style={styles.avatar} />
-                <LinearGradient
-                  colors={['rgba(0,0,0,0.6)', 'rgba(0,0,0,0.8)']}
-                  style={styles.avatarOverlay}
-                >
-                  <Ionicons name="camera" size={24} color="white" />
-                </LinearGradient>
-              </View>
-            </TouchableOpacity>
+            <View style={styles.avatarContainer}>
+              <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+            </View>
             <Text style={styles.avatarText}>Tap to change photo</Text>
             {user.user_type && (
               <View style={styles.userTypeBadge}>

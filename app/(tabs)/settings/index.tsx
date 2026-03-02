@@ -85,7 +85,7 @@ const SettingItem = ({ icon, label, value, onValueChange, onPress, type, isLast 
 
 export default function Settings() {
   const router = useRouter();
-  const { user, logout, isLoading: authLoading, updateUserProfile } = useAuth();
+  const { user, logout, isLoading: authLoading, deactivateAccount } = useAuth();
   const { isDarkMode, toggleDarkMode, colors } = useSafeTheme();
   const [loading, setLoading] = useState(false);
   const [notifications, setNotifications] = useState(true);
@@ -96,6 +96,28 @@ export default function Settings() {
       console.log('User loaded:', user);
     }
   }, [user]);
+
+  const handleDeactivate = () => {
+    Alert.alert(
+      'Deactivate Account',
+      'Are you sure you want to delete your account? This action is permanent and all your progress will be lost.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Deactivate', 
+          style: 'destructive', 
+          onPress: async () => {
+            try {
+              await deactivateAccount();
+              router.replace('/auth/login');
+            } catch (err: any) {
+              Alert.alert('Error', err.message);
+            }
+          } 
+        }
+      ]
+    );
+  };
 
   const updatePreferences = async (preferences: { notifications?: boolean; highContrast?: boolean }) => {
     try {
@@ -305,9 +327,6 @@ export default function Settings() {
               </LinearGradient>
               <Text style={[styles.logoText, { color: colors.primary }]}>FocusFlow</Text>
             </View>
-            <TouchableOpacity style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleMenu}>
-              <Ionicons name="menu-outline" size={22} color={colors.primary} />
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -358,26 +377,26 @@ export default function Settings() {
               value={isDarkMode} 
               onValueChange={handleDarkModeToggle} 
             />
-            <SettingItem 
+            {/* <SettingItem 
               icon="eye-outline" 
               label="High Contrast" 
               type="toggle" 
               value={highContrast} 
               onValueChange={handleHighContrastToggle} 
               isLast 
-            />
+            /> */}
           </View>
 
           {/* PRIVACY & SECURITY */}
           <Text style={[styles.sectionTitle, { color: colors.textLight }]}>Privacy & Security</Text>
           <View style={[styles.settingsGroup, { backgroundColor: colors.settingsBg, borderColor: colors.settingsBorder }]}>
-            <SettingItem 
+            {/* <SettingItem 
               icon="notifications-outline" 
               label="Notifications" 
               type="toggle" 
               value={notifications} 
               onValueChange={handleNotificationsToggle} 
-            />
+            /> */}
             <SettingItem 
               icon="lock-closed-outline" 
               label="Privacy Policy" 
@@ -391,6 +410,22 @@ export default function Settings() {
               onPress={handleAccountSecurity}
               isLast 
             />
+          </View>
+
+          <Text style={[styles.sectionTitle, { color: '#A62D2D', marginTop: 20 }]}>Danger Zone</Text>
+          <View style={[styles.settingsGroup, { backgroundColor: colors.settingsBg, borderColor: '#FFDADA', borderWidth: 1 }]}>
+            <TouchableOpacity 
+              style={styles.settingItem} 
+              onPress={handleDeactivate}
+            >
+              <View style={styles.settingLeft}>
+                <View style={[styles.iconBg, { backgroundColor: '#FFF0F0' }]}>
+                  <Ionicons name="trash-outline" size={20} color="#A62D2D" />
+                </View>
+                <Text style={[styles.settingLabel, { color: '#A62D2D' }]}>Deactivate Account</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#A62D2D" />
+            </TouchableOpacity>
           </View>
 
           {/* OTHER */}

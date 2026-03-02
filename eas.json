@@ -1,0 +1,45 @@
+{
+  "cli": {
+    "version": ">= 16.17.4",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://nrhqwvamfmxaiichehdl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5yaHF3dmFtZm14YWlpY2hlaGRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYxNDQzMDMsImV4cCI6MjA4MTcyMDMwM30.rD8-9XwF0hkn_nw9gAOiHw0y6_Ld1sonxUvGI9y5ePo"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://nrhqwvamfmxaiichehdl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5yaHF3dmFtZm14YWlpY2hlaGRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYxNDQzMDMsImV4cCI6MjA4MTcyMDMwM30.rD8-9XwF0hkn_nw9gAOiHw0y6_Ld1sonxUvGI9y5ePo"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://nrhqwvamfmxaiichehdl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5yaHF3dmFtZm14YWlpY2hlaGRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYxNDQzMDMsImV4cCI6MjA4MTcyMDMwM30.rD8-9XwF0hkn_nw9gAOiHw0y6_Ld1sonxUvGI9y5ePo"
+      },
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "allenbuenaventura775@gmail.com",
+        "ascAppId": "6758321014",
+        "appleTeamId": "587736ZDNK"
+      }
+    }
+  }
+}

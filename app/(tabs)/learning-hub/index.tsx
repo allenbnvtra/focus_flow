@@ -37,41 +37,41 @@ export default function LearningHub() {
       route: 'learning-hub/games/memory',
       colors: [Colors.purpleDark, Colors.purple, Colors.purpleLight] as const,
     },
-    {
-      id: 2,
-      icon: 'book-outline',
-      title: 'Quick Reads',
-      description: 'Short science-based reads to help you understand your focus and emotions.',
-      colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
-    },
-    {
-      id: 3,
-      icon: 'play-circle-outline',
-      title: 'Watch and Learn',
-      description: 'Simple, visual lessons that show how to stay calm and focused every day.',
-      colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
-    },
-    {
-      id: 4,
-      icon: 'extension-puzzle-outline',
-      title: 'Visual Tips',
-      description: 'Colorful guides and emotion concepts that are easy to remember.',
-      colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
-    },
-    {
-      id: 5,
-      icon: 'bulb-outline',
-      title: 'Test What You Know',
-      description: "Quizzes to see how much you've learned — no pressure, just fun discovery!",
-      colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
-    },
-    {
-      id: 6,
-      icon: 'volume-high-outline',
-      title: 'Listen Mode',
-      description: 'Learn on the go with guided audio about attention and mindfulness.',
-      colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
-    },
+    // {
+    //   id: 2,
+    //   icon: 'book-outline',
+    //   title: 'Quick Reads',
+    //   description: 'Short science-based reads to help you understand your focus and emotions.',
+    //   colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
+    // },
+    // {
+    //   id: 3,
+    //   icon: 'play-circle-outline',
+    //   title: 'Watch and Learn',
+    //   description: 'Simple, visual lessons that show how to stay calm and focused every day.',
+    //   colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
+    // },
+    // {
+    //   id: 4,
+    //   icon: 'extension-puzzle-outline',
+    //   title: 'Visual Tips',
+    //   description: 'Colorful guides and emotion concepts that are easy to remember.',
+    //   colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
+    // },
+    // {
+    //   id: 5,
+    //   icon: 'bulb-outline',
+    //   title: 'Test What You Know',
+    //   description: "Quizzes to see how much you've learned — no pressure, just fun discovery!",
+    //   colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
+    // },
+    // {
+    //   id: 6,
+    //   icon: 'volume-high-outline',
+    //   title: 'Listen Mode',
+    //   description: 'Learn on the go with guided audio about attention and mindfulness.',
+    //   colors: [Colors.cardDark1, Colors.cardDark2, Colors.cardDark3] as const,
+    // },
   ];
 
   const handleCardPress = (item: LearningItem) => {
@@ -228,14 +228,6 @@ export default function LearningHub() {
                 <Ionicons name="flash" size={24} color={Colors.white} />
               </LinearGradient>
               <Text style={styles.logoText}>FocusFlow</Text>
-            </View>
-            <View style={styles.headerIcons}>
-              <TouchableOpacity style={styles.iconButton}>
-                <Ionicons name="moon-outline" size={22} color={Colors.primary} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconButton}>
-                <Ionicons name="menu-outline" size={22} color={Colors.primary} />
-              </TouchableOpacity>
             </View>
           </View>
         </View>

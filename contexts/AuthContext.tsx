@@ -10,11 +10,13 @@ interface User {
   name: string;
   role?: string;
   is_admin?: boolean;
+  is_active?: boolean;
   user_type?: 'individual' | 'parent' | 'guest';
   goals?: string[];
   check_in_frequency?: string;
   created_at?: string;
   updated_at?: string;
+  deactivated_at?: string;
 }
 
 interface AuthContextType {
@@ -27,6 +29,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   setUser: (user: User | null) => void;
   updateUserProfile: (data: Partial<User>) => Promise<void>;
+  deactivateAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -59,6 +62,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
+  const deactivateAccount = async () => {
+    try {
+      setIsLoading(true);
+      const userId = user?.id || session?.user?.id;
+
+      if (!userId) throw new Error('No active session found.');
+
+      console.log('🗑️ Deactivating account for user:', userId);
+
+      // Soft delete - mark as inactive
+      const { error } = await supabase
+        .from('users')
+        .update({ 
+          is_active: false,
+          deactivated_at: new Date().toISOString()
+        })
+        .eq('id', userId);
+
+      if (error) {
+        console.error('Deactivation error:', error);
+        throw error;
+      }
+
+      console.log('✅ Account marked as deactivated');
+
+      // Sign out
+      await logout();
+      
+      console.log('✅ Account deactivated successfully');
+    } catch (error: any) {
+      console.error('Deactivation error:', error);
+      throw new Error(error.message || 'Failed to deactivate account');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const checkAsyncStorageAuth = async () => {
     try {
       const token = await AsyncStorage.getItem('authToken');
@@ -90,10 +130,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role: 'user',
         user_type: data.user_type,
         is_admin: data.is_admin || false,
+        is_active: data.is_active ?? true, // Default to true if null
         goals: data.goals,
         check_in_frequency: data.check_in_frequency,
         created_at: data.created_at,
         updated_at: data.updated_at,
+        deactivated_at: data.deactivated_at,
       };
 
       setUser(userData);
@@ -143,6 +185,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           id: authData.user.id,
           email,
           name,
+          is_active: true, // Explicitly set to true for new users
         })
         .select()
         .single();
@@ -160,6 +203,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         name: profileData.name,
         role: 'user',
         user_type: profileData.user_type,
+        is_active: profileData.is_active ?? true,
         goals: profileData.goals,
         check_in_frequency: profileData.check_in_frequency,
         created_at: profileData.created_at,
@@ -190,6 +234,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error) throw error;
 
       if (data.user) {
+        // Check if account is deactivated
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('is_active')
+          .eq('id', data.user.id)
+          .single();
+
+        // Handle case where user profile doesn't exist (shouldn't happen, but safe check)
+        if (userError && userError.code !== 'PGRST116') {
+          console.error('Error fetching user data:', userError);
+          throw new Error('Failed to verify account status');
+        }
+
+        // If is_active is explicitly false, prevent login
+        if (userData && userData.is_active === false) {
+          await supabase.auth.signOut();
+          throw new Error('This account has been deactivated. Please contact support if you believe this is an error.');
+        }
+
         if (data.session) {
           setSession(data.session);
           await AsyncStorage.setItem('authToken', data.session.access_token);
@@ -259,7 +322,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // Remove read-only fields
-      const { role, id, email, created_at, updated_at, ...supabaseData } = data;
+      const { role, id, email, created_at, updated_at, is_active, deactivated_at, ...supabaseData } = data;
 
       console.log('📝 Updating profile for user:', userId);
       console.log('📝 Update data:', JSON.stringify(supabaseData, null, 2));
@@ -297,6 +360,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         setUser,
         updateUserProfile,
+        deactivateAccount,
       }}
     >
       {children}

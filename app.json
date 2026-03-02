@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "focus_flow",
+    "name": "Focusflow",
     "slug": "focus_flow",
     "scheme": "focusflow",
     "version": "1.0.0",
@@ -14,7 +14,13 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.focusflow.focusflowapp2026",
+      "buildNumber": "8",
+      "appleTeamId": "587736ZDNK",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +28,8 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.focusflow.focusflowapp2026"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -31,6 +38,13 @@
       "expo-secure-store",
       "expo-router",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c390cd20-4bef-4b81-b7fb-e5d2f9a58cec"
+      }
+    },
+    "owner": "allenbnvtra11"
   }
 }
