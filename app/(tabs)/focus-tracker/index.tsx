@@ -11,9 +11,10 @@ import Background from "../../../components/Background";
 import { useAuth } from "../../../contexts/AuthContext";
 import { supabase } from "../../../lib/supabase";
 import { useTheme } from "../../../contexts/ThemeContext";
+import { scheduleUndoneTaskReminder, scheduleStreakReminder } from "../../../lib/notifications";
 
-const TIMER_STORAGE_KEY  = "focusflow_active_timer";
-const GOAL_STORAGE_KEY   = "focusflow_daily_goal";        // NEW
+const TIMER_STORAGE_KEY = "focusflow_active_timer";
+const GOAL_STORAGE_KEY  = "focusflow_daily_goal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -99,12 +100,12 @@ export default function FocusTracker() {
   const [showEditModal, setShowEditModal]                 = useState(false);
   const [editTaskText, setEditTaskText]                   = useState("");
 
-  // ── NEW: Daily goal countdown ──────────────────────────────────────────────
-  const [dailyGoalSeconds, setDailyGoalSeconds] = useState<number>(0);   // 0 = not set
+  // Daily goal countdown
+  const [dailyGoalSeconds, setDailyGoalSeconds] = useState<number>(0);
   const [showGoalModal, setShowGoalModal]       = useState(false);
   const [goalHours, setGoalHours]               = useState("2");
   const [goalMinutes, setGoalMinutes]           = useState("0");
-  const goalAlertedRef = useRef(false);          // fire "Goal reached!" only once
+  const goalAlertedRef = useRef(false);
 
   // ─── Effects ─────────────────────────────────────────────────────────────────
 
@@ -113,7 +114,7 @@ export default function FocusTracker() {
       fetchTasks();
       fetchTodaySessions();
       restoreTimerState();
-      loadDailyGoal();          // NEW
+      loadDailyGoal();
     }
   }, [user]);
 
@@ -142,20 +143,44 @@ export default function FocusTracker() {
     return () => clearInterval(interval);
   }, [activeTaskId, isPaused, sessionStartTime, elapsedAtPause]);
 
-  // NEW: fire a one-time alert when the countdown hits 0, then persist the alerted flag
+  // Fire one-time alert when daily goal is reached
   useEffect(() => {
     if (!dailyGoalSeconds) return;
     const totalSpent = totalSessionSecs + (activeTaskId ? elapsedSeconds : 0);
     if (totalSpent >= dailyGoalSeconds && !goalAlertedRef.current) {
       goalAlertedRef.current = true;
-      saveDailyGoal(dailyGoalSeconds, true); // persist so it won't re-fire after restart
+      saveDailyGoal(dailyGoalSeconds, true);
       Alert.alert("🏆 Daily Goal Reached!", "You've hit your focus target for today. Amazing work!");
     }
   }, [elapsedSeconds, todaySessions, dailyGoalSeconds]);
 
+  // ── Poll for pause/resume actions from notification buttons ───────────────
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const action = await AsyncStorage.getItem("focusflow_notif_action");
+      if (!action) return;
+      await AsyncStorage.removeItem("focusflow_notif_action");
+      if (action === "pause"  && activeTaskId && !isPaused) handlePause();
+      if (action === "resume" && activeTaskId && isPaused)  handleResume();
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeTaskId, isPaused]);
+
+  // ── Schedule undone task reminders when tasks change ──────────────────────
+  useEffect(() => {
+    if (!tasks.length) return;
+    const incomplete = tasks.filter(t => !t.completed).map(t => t.text);
+    scheduleUndoneTaskReminder(incomplete);
+  }, [tasks]);
+
+  // ── Schedule streak reminder when sessions change ─────────────────────────
+  useEffect(() => {
+    scheduleStreakReminder(todaySessions.length > 0);
+  }, [todaySessions]);
+
   // ─── Daily goal persistence ───────────────────────────────────────────────
 
-  const todayDateStr = () => new Date().toISOString().split("T")[0]; // "YYYY-MM-DD"
+  const todayDateStr = () => new Date().toISOString().split("T")[0];
 
   const loadDailyGoal = async () => {
     try {
@@ -163,9 +188,7 @@ export default function FocusTracker() {
       if (!raw) return;
       const { goalSecs, goalDate, goalAlerted } = JSON.parse(raw);
       const today = todayDateStr();
-
       if (goalDate !== today) {
-        // New day — keep the goal duration but reset the alerted flag
         goalAlertedRef.current = false;
         await AsyncStorage.setItem(
           GOAL_STORAGE_KEY,
@@ -174,11 +197,8 @@ export default function FocusTracker() {
       } else {
         goalAlertedRef.current = goalAlerted ?? false;
       }
-
       setDailyGoalSeconds(goalSecs ?? 0);
-    } catch (e) {
-      console.error("Failed to load daily goal:", e);
-    }
+    } catch (e) { console.error("Failed to load daily goal:", e); }
   };
 
   const saveDailyGoal = async (secs: number, alerted = goalAlertedRef.current) => {
@@ -187,13 +207,11 @@ export default function FocusTracker() {
         GOAL_STORAGE_KEY,
         JSON.stringify({ goalSecs: secs, goalDate: todayDateStr(), goalAlerted: alerted })
       );
-    } catch (e) {
-      console.error("Failed to save daily goal:", e);
-    }
+    } catch (e) { console.error("Failed to save daily goal:", e); }
   };
 
   const confirmGoal = () => {
-    const h = Math.max(0, parseInt(goalHours  || "0", 10));
+    const h = Math.max(0, parseInt(goalHours   || "0", 10));
     const m = Math.max(0, Math.min(59, parseInt(goalMinutes || "0", 10)));
     const secs = h * 3600 + m * 60;
     if (secs === 0) { Alert.alert("Invalid Goal", "Please enter at least 1 minute."); return; }
@@ -210,7 +228,7 @@ export default function FocusTracker() {
     setShowGoalModal(false);
   };
 
-  // ─── Timer persistence ────────────────────────────────────────────────────────
+  // ─── Timer persistence ────────────────────────────────────────────────────
 
   const saveTimerState = async () => {
     try {
@@ -274,7 +292,7 @@ export default function FocusTracker() {
     } catch (e) { console.error("Failed to restore timer state:", e); }
   };
 
-  // ─── Data fetching ────────────────────────────────────────────────────────────
+  // ─── Data fetching ────────────────────────────────────────────────────────
 
   const fetchTasks = async () => {
     try {
@@ -313,7 +331,7 @@ export default function FocusTracker() {
     } catch (e) { console.error("Error fetching sessions:", e); }
   };
 
-  // ─── Timer helpers ────────────────────────────────────────────────────────────
+  // ─── Timer helpers ────────────────────────────────────────────────────────
 
   const startNewTask = (taskId: string) => {
     setActiveTaskId(taskId);
@@ -348,7 +366,7 @@ export default function FocusTracker() {
     startNewTask(taskId);
   };
 
-  // ─── Pause ────────────────────────────────────────────────────────────────────
+  // ─── Pause ────────────────────────────────────────────────────────────────
 
   const handlePause = () => {
     setElapsedAtPause(elapsedSeconds);
@@ -376,7 +394,7 @@ export default function FocusTracker() {
     setPauseReason(null);
   };
 
-  // ─── Completion ───────────────────────────────────────────────────────────────
+  // ─── Completion ───────────────────────────────────────────────────────────
 
   const handleCompleteActiveTask = () => {
     if (!activeTaskId) return;
@@ -388,7 +406,7 @@ export default function FocusTracker() {
   };
 
   const confirmCompletion = async () => {
-    const taskId = pendingCompletionTaskId;
+    const taskId  = pendingCompletionTaskId;
     const elapsed = pendingElapsedSeconds;
     if (!taskId) return;
     setSavingCompletion(true);
@@ -420,7 +438,7 @@ export default function FocusTracker() {
     finally { setSavingCompletion(false); }
   };
 
-  // ─── Stop early ───────────────────────────────────────────────────────────────
+  // ─── Stop early ───────────────────────────────────────────────────────────
 
   const handleStopTask = () => {
     Alert.alert("Stop Session?", "Save progress before stopping?", [
@@ -455,7 +473,7 @@ export default function FocusTracker() {
     resetTimer();
   };
 
-  // ─── Task CRUD ────────────────────────────────────────────────────────────────
+  // ─── Task CRUD ────────────────────────────────────────────────────────────
 
   const handleAddTask = async () => {
     if (!newTaskText.trim()) { Alert.alert("Error", "Please enter a task"); return; }
@@ -503,7 +521,7 @@ export default function FocusTracker() {
     ]);
   };
 
-  // ─── Formatters ───────────────────────────────────────────────────────────────
+  // ─── Formatters ───────────────────────────────────────────────────────────
 
   const pad = (n: number) => n.toString().padStart(2, "0");
 
@@ -530,7 +548,7 @@ export default function FocusTracker() {
   const formatSessionTime = (iso: string) =>
     new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  // ─── Derived ─────────────────────────────────────────────────────────────────
+  // ─── Derived ─────────────────────────────────────────────────────────────
 
   const completedCount   = tasks.filter(t => t.completed).length;
   const totalCount       = tasks.length;
@@ -538,7 +556,6 @@ export default function FocusTracker() {
   const totalSessionSecs = todaySessions.reduce((s, sess) => s + sess.duration_minutes, 0);
   const activeTask       = tasks.find(t => t.id === activeTaskId);
 
-  // NEW: live total spent = completed sessions + current active tick
   const liveSpentSeconds = totalSessionSecs + (activeTaskId ? elapsedSeconds : 0);
   const countdownSeconds = dailyGoalSeconds > 0
     ? Math.max(0, dailyGoalSeconds - liveSpentSeconds)
@@ -548,7 +565,7 @@ export default function FocusTracker() {
     : 0;
   const goalReached = dailyGoalSeconds > 0 && countdownSeconds === 0;
 
-  // ─── Styles ──────────────────────────────────────────────────────────────────
+  // ─── Styles ──────────────────────────────────────────────────────────────
 
   const styles = StyleSheet.create({
     container: { flex: 1 },
@@ -567,11 +584,8 @@ export default function FocusTracker() {
     statValue: { fontSize: 22, fontWeight: "800", color: colors.primary },
     statLabel: { fontSize: 11, fontWeight: "600", color: colors.textLight, marginTop: 2 },
 
-    // ── NEW: Countdown goal card ──────────────────────────────────────────────
-    goalCard: {
-      backgroundColor: colors.cardBg, borderRadius: 20, borderWidth: 1.5,
-      borderColor: colors.border, padding: 16, marginBottom: 16,
-    },
+    // Goal card
+    goalCard: { backgroundColor: colors.cardBg, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border, padding: 16, marginBottom: 16 },
     goalCardReached: { borderColor: "#4CAF50" },
     goalCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
     goalCardTitle: { fontSize: 14, fontWeight: "700", color: colors.textMedium, letterSpacing: 0.3 },
@@ -582,19 +596,17 @@ export default function FocusTracker() {
     goalCountdownLabel: { fontSize: 13, fontWeight: "600", color: colors.textLight, marginBottom: 6 },
     goalReachedBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(76,175,80,0.12)", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, marginBottom: 6 },
     goalReachedText: { fontSize: 13, fontWeight: "700", color: "#4CAF50" },
-    // Progress bar
     progressTrack: { height: 8, backgroundColor: isDarkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)", borderRadius: 4, overflow: "hidden" },
     progressFill: { height: "100%", borderRadius: 4 },
     progressMetaRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 6 },
     progressMetaText: { fontSize: 11, fontWeight: "600", color: colors.textLight },
-    // Set goal prompt
     goalSetPrompt: { flexDirection: "row", alignItems: "center", gap: 10 },
     goalSetPromptText: { flex: 1, fontSize: 14, color: colors.textLight },
     goalSetBtn: { borderRadius: 12, overflow: "hidden" },
     goalSetBtnGradient: { paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 6 },
     goalSetBtnText: { fontSize: 13, fontWeight: "700", color: "white" },
 
-    // ── NEW: Goal modal ───────────────────────────────────────────────────────
+    // Goal modal
     goalModalContent: { backgroundColor: colors.surface, borderRadius: 28, padding: 24, width: "100%", maxWidth: 380, borderWidth: 2, borderColor: colors.border },
     goalModalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
     goalModalTitle: { fontSize: 20, fontWeight: "800", color: colors.textDark },
@@ -668,7 +680,7 @@ export default function FocusTracker() {
     totalSessionLabel: { fontSize: 14, fontWeight: "600", color: colors.textMedium },
     totalSessionValue: { fontSize: 18, fontWeight: "800", color: colors.primary },
 
-    // Modals (shared)
+    // Modals
     modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 },
     addTaskModalContent: { backgroundColor: colors.surface, borderRadius: 30, padding: 24, width: "100%", maxWidth: 400, borderWidth: 2, borderColor: colors.border },
     addTaskHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
@@ -714,7 +726,7 @@ export default function FocusTracker() {
     emotionCheck: { position: "absolute", top: 6, right: 6, width: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   });
 
-  // ─── Goal card sub-render ─────────────────────────────────────────────────
+  // ─── Goal card ────────────────────────────────────────────────────────────
 
   const renderGoalCard = () => {
     const progressColors: [string, string] = goalReached
@@ -748,8 +760,6 @@ export default function FocusTracker() {
                 <Text style={styles.goalCountdownLabel}>remaining</Text>
               )}
             </View>
-
-            {/* Progress bar */}
             <View style={styles.progressTrack}>
               <LinearGradient
                 colors={progressColors}
@@ -758,9 +768,7 @@ export default function FocusTracker() {
               />
             </View>
             <View style={styles.progressMetaRow}>
-              <Text style={styles.progressMetaText}>
-                {formatSessionDuration(liveSpentSeconds)} done
-              </Text>
+              <Text style={styles.progressMetaText}>{formatSessionDuration(liveSpentSeconds)} done</Text>
               <Text style={styles.progressMetaText}>
                 {Math.round(goalProgress * 100)}% · Goal: {formatSessionDuration(dailyGoalSeconds)}
               </Text>
@@ -769,9 +777,7 @@ export default function FocusTracker() {
         ) : (
           <View style={styles.goalSetPrompt}>
             <Ionicons name="flag-outline" size={22} color={colors.textLight} />
-            <Text style={styles.goalSetPromptText}>
-              Set a daily focus goal to track your progress.
-            </Text>
+            <Text style={styles.goalSetPromptText}>Set a daily focus goal to track your progress.</Text>
             <TouchableOpacity style={styles.goalSetBtn} onPress={() => setShowGoalModal(true)}>
               <LinearGradient colors={[colors.primary, colors.primaryDark ?? colors.primary]} style={styles.goalSetBtnGradient}>
                 <Ionicons name="add" size={14} color="white" />
@@ -784,7 +790,7 @@ export default function FocusTracker() {
     );
   };
 
-  // ─── Render ───────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <Background>
@@ -802,7 +808,7 @@ export default function FocusTracker() {
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          <Text style={styles.pageTitle}>Sipat: Daily Focus Tracker</Text>
+          <Text style={styles.pageTitle}>Daily Focus Tracker</Text>
 
           {/* STATS BAR */}
           <View style={styles.statsBar}>
@@ -822,7 +828,7 @@ export default function FocusTracker() {
             </View>
           </View>
 
-          {/* ── NEW: DAILY GOAL COUNTDOWN CARD ── */}
+          {/* DAILY GOAL COUNTDOWN CARD */}
           {renderGoalCard()}
 
           {/* ACTIVE TASK BANNER */}
@@ -971,53 +977,39 @@ export default function FocusTracker() {
           )}
         </ScrollView>
 
-        {/* ── NEW: SET GOAL MODAL ── */}
-        <Modal visible={showGoalModal} transparent animationType="slide"
-          onRequestClose={() => setShowGoalModal(false)}>
+        {/* SET GOAL MODAL */}
+        <Modal visible={showGoalModal} transparent animationType="slide" onRequestClose={() => setShowGoalModal(false)}>
           <View style={styles.modalOverlay}>
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.goalModalContent}>
               <View style={styles.goalModalHeader}>
                 <Text style={styles.goalModalTitle}>Set Daily Goal ⏱</Text>
-                <TouchableOpacity onPress={() => setShowGoalModal(false)}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <TouchableOpacity onPress={() => setShowGoalModal(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                   <Ionicons name="close" size={26} color={colors.textMedium} />
                 </TouchableOpacity>
               </View>
-              <Text style={styles.goalModalSub}>
-                How long do you want to focus today? The countdown starts immediately.
-              </Text>
-
-              {/* HH : MM inputs */}
+              <Text style={styles.goalModalSub}>How long do you want to focus today? The countdown starts immediately.</Text>
               <View style={styles.goalInputRow}>
                 <View style={styles.goalInputBlock}>
                   <Text style={styles.goalInputLabel}>HOURS</Text>
                   <TextInput
-                    style={styles.goalInput}
-                    value={goalHours}
+                    style={styles.goalInput} value={goalHours}
                     onChangeText={v => setGoalHours(v.replace(/[^0-9]/g, "").slice(0, 2))}
-                    keyboardType="number-pad"
-                    maxLength={2}
-                    selectTextOnFocus
+                    keyboardType="number-pad" maxLength={2} selectTextOnFocus
                   />
                 </View>
                 <Text style={styles.goalInputSep}>:</Text>
                 <View style={styles.goalInputBlock}>
                   <Text style={styles.goalInputLabel}>MINUTES</Text>
                   <TextInput
-                    style={styles.goalInput}
-                    value={goalMinutes}
+                    style={styles.goalInput} value={goalMinutes}
                     onChangeText={v => {
                       const n = parseInt(v.replace(/[^0-9]/g, "") || "0", 10);
                       setGoalMinutes(Math.min(59, n).toString());
                     }}
-                    keyboardType="number-pad"
-                    maxLength={2}
-                    selectTextOnFocus
+                    keyboardType="number-pad" maxLength={2} selectTextOnFocus
                   />
                 </View>
               </View>
-
-              {/* Quick presets */}
               <View style={styles.goalPresets}>
                 {[
                   { label: "30 min", h: 0, m: 30 },
@@ -1031,20 +1023,21 @@ export default function FocusTracker() {
                     key={p.label}
                     style={[
                       styles.goalPresetChip,
-                      goalHours === p.h.toString() && goalMinutes === p.m.toString() && { borderColor: colors.primary, backgroundColor: isDarkMode ? "rgba(93,184,154,0.15)" : "rgba(79,195,247,0.1)" },
+                      goalHours === p.h.toString() && goalMinutes === p.m.toString() &&
+                        { borderColor: colors.primary, backgroundColor: isDarkMode ? "rgba(93,184,154,0.15)" : "rgba(79,195,247,0.1)" },
                     ]}
                     onPress={() => { setGoalHours(p.h.toString()); setGoalMinutes(p.m.toString()); }}
                   >
                     <Text style={[
                       styles.goalPresetText,
-                      goalHours === p.h.toString() && goalMinutes === p.m.toString() && { color: colors.primary, fontWeight: "700" },
+                      goalHours === p.h.toString() && goalMinutes === p.m.toString() &&
+                        { color: colors.primary, fontWeight: "700" },
                     ]}>
                       {p.label}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
-
               <View style={styles.goalModalBtns}>
                 {dailyGoalSeconds > 0 && (
                   <TouchableOpacity style={styles.goalClearBtn} onPress={clearGoal}>
@@ -1061,7 +1054,7 @@ export default function FocusTracker() {
           </View>
         </Modal>
 
-        {/* ── POST-COMPLETION EMOTION MODAL ── */}
+        {/* POST-COMPLETION EMOTION MODAL */}
         <Modal visible={showEmotionModal} transparent animationType="slide" onRequestClose={() => {}}>
           <View style={styles.modalOverlay}>
             <View style={styles.emotionModalContent}>
@@ -1128,9 +1121,8 @@ export default function FocusTracker() {
           </View>
         </Modal>
 
-        {/* ── PAUSE REASON MODAL ── */}
-        <Modal visible={showPauseModal} transparent animationType="slide"
-          onRequestClose={() => setShowPauseModal(false)}>
+        {/* PAUSE REASON MODAL */}
+        <Modal visible={showPauseModal} transparent animationType="slide" onRequestClose={() => setShowPauseModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.pauseModalContent}>
               <View style={styles.pauseModalHeader}>
@@ -1174,7 +1166,7 @@ export default function FocusTracker() {
           </View>
         </Modal>
 
-        {/* ── ACTION MENU ── */}
+        {/* ACTION MENU */}
         <Modal visible={showActionMenu} transparent animationType="fade"
           onRequestClose={() => { setShowActionMenu(false); setSelectedTaskForAction(null); }}>
           <TouchableOpacity style={styles.actionMenuOverlay} activeOpacity={1}
@@ -1217,7 +1209,7 @@ export default function FocusTracker() {
           </TouchableOpacity>
         </Modal>
 
-        {/* ── EDIT TASK MODAL ── */}
+        {/* EDIT TASK MODAL */}
         <Modal visible={showEditModal} transparent animationType="slide"
           onRequestClose={() => { setShowEditModal(false); setEditTaskText(""); setEditingTask(null); }}>
           <View style={styles.modalOverlay}>
@@ -1246,9 +1238,8 @@ export default function FocusTracker() {
           </View>
         </Modal>
 
-        {/* ── ADD TASK MODAL ── */}
-        <Modal visible={showAddTaskModal} transparent animationType="slide"
-          onRequestClose={() => setShowAddTaskModal(false)}>
+        {/* ADD TASK MODAL */}
+        <Modal visible={showAddTaskModal} transparent animationType="slide" onRequestClose={() => setShowAddTaskModal(false)}>
           <View style={styles.modalOverlay}>
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.addTaskModalContent}>
               <View style={styles.addTaskHeader}>

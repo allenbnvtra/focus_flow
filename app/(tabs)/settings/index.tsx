@@ -244,7 +244,7 @@ export default function Settings() {
 
     Alert.alert(
       'About FocusFlow',
-      `FocusFlow v2.1.0\n\nYour personal productivity companion for deep work and focused achievement.\n\nMember since: ${memberSince}\n\n© 2024 FocusFlow Inc.\nAll rights reserved.`,
+      `FocusFlow v2.1.0\n\nYour personal productivity companion for deep work and focused achievement.\n\nMember since: ${memberSince}\n\n© 2026 FocusFlow Inc.\nAll rights reserved.`,
       [{ text: 'OK' }]
     );
   };
