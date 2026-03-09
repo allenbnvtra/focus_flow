@@ -69,8 +69,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (!userId) throw new Error('No active session found.');
 
-      console.log('🗑️ Deactivating account for user:', userId);
-
       // Soft delete - mark as inactive
       const { error } = await supabase
         .from('users')
@@ -85,12 +83,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw error;
       }
 
-      console.log('✅ Account marked as deactivated');
-
       // Sign out
       await logout();
-      
-      console.log('✅ Account deactivated successfully');
     } catch (error: any) {
       console.error('Deactivation error:', error);
       throw new Error(error.message || 'Failed to deactivate account');
@@ -121,8 +115,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('id', userId)
         .single();
 
+      if (error && error.code === 'PGRST116') {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+
+        if (!authUser) throw new Error('No authenticated user found.');
+
+        const { data: newProfile, error: insertError } = await supabase
+          .from('users')
+          .insert({
+            id: authUser.id,
+            email: authUser.email ?? '',
+            name: authUser.user_metadata?.name ?? authUser.email?.split('@')[0] ?? 'User',
+            is_active: true,
+          })
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error('❌ Failed to create profile:', insertError);
+          throw insertError;
+        }
+
+        const userData: User = {
+          id: newProfile.id,
+          email: newProfile.email,
+          name: newProfile.name,
+          role: 'user',
+          user_type: newProfile.user_type,
+          is_admin: newProfile.is_admin || false,
+          is_active: newProfile.is_active ?? true,
+          goals: newProfile.goals,
+          check_in_frequency: newProfile.check_in_frequency,
+          created_at: newProfile.created_at,
+          updated_at: newProfile.updated_at,
+        };
+
+        setUser(userData);
+        await AsyncStorage.setItem('userData', JSON.stringify(userData));
+        return;
+      }
+
       if (error) throw error;
-      
+
       const userData: User = {
         id: data.id,
         email: data.email,
@@ -130,7 +164,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role: 'user',
         user_type: data.user_type,
         is_admin: data.is_admin || false,
-        is_active: data.is_active ?? true, // Default to true if null
+        is_active: data.is_active ?? true,
         goals: data.goals,
         check_in_frequency: data.check_in_frequency,
         created_at: data.created_at,
@@ -170,13 +204,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('No user returned from signup');
       }
 
-      console.log('✅ Auth user created:', authData.user.id);
-
       // Set session immediately BEFORE any other operations
       if (authData.session) {
         setSession(authData.session);
         await AsyncStorage.setItem('authToken', authData.session.access_token);
-        console.log('✅ Session set in context');
       }
 
       const { data: profileData, error: profileError } = await supabase
@@ -195,8 +226,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw profileError;
       }
 
-      console.log('✅ User profile created');
-
       const userData: User = {
         id: profileData.id,
         email: profileData.email,
@@ -213,7 +242,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(userData);
       await AsyncStorage.setItem('userData', JSON.stringify(userData));
       
-      console.log('✅ User signed up successfully');
     } catch (error: any) {
       console.error('Signup error:', error);
       throw new Error(error.message || 'Failed to sign up');
@@ -258,7 +286,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await AsyncStorage.setItem('authToken', data.session.access_token);
         }
         await fetchUserProfile(data.user.id);
-        console.log('✅ User logged in successfully');
       }
     } catch (error: any) {
       console.error('Login error:', error);
@@ -279,7 +306,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setUser(null);
       setSession(null);
-      console.log('✅ User logged out successfully');
     } catch (error: any) {
       console.error('Logout error:', error);
       throw new Error(error.message || 'Failed to logout');
@@ -296,23 +322,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let userId = user?.id;
       
       if (!userId) {
-        console.log('⚠️ No user in context, checking session state...');
-        
         // Check React state session first
         if (session?.user?.id) {
           userId = session.user.id;
-          console.log('✅ Got user ID from React session state:', userId);
         }
       }
 
       // If still no userId, fetch from Supabase
       if (!userId) {
-        console.log('⚠️ No session in state, fetching from Supabase...');
         const { data: { session: fetchedSession } } = await supabase.auth.getSession();
         
         if (fetchedSession?.user?.id) {
           userId = fetchedSession.user.id;
-          console.log('✅ Got user ID from Supabase session:', userId);
         }
       }
 
@@ -323,9 +344,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Remove read-only fields
       const { role, id, email, created_at, updated_at, is_active, deactivated_at, ...supabaseData } = data;
-
-      console.log('📝 Updating profile for user:', userId);
-      console.log('📝 Update data:', JSON.stringify(supabaseData, null, 2));
 
       const { error } = await supabase
         .from('users')
@@ -339,7 +357,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Refresh user profile
       await fetchUserProfile(userId);
-      console.log('✅ User profile updated successfully');
     } catch (error: any) {
       console.error('Update profile error:', error);
       throw new Error(error.message || 'Failed to update profile');

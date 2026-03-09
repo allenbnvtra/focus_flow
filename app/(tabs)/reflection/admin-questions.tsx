@@ -486,7 +486,7 @@ export default function AdminQuestions() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 20, paddingTop: Platform.OS === "ios" ? 60 : 20, paddingBottom: 15 },
+  header: { paddingHorizontal: 20, paddingTop: Platform.OS === "ios" ? 20 : 20, paddingBottom: 15 },
   headerContent: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   backButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: Colors.white, alignItems: "center", justifyContent: "center" },
   headerTitle: { fontSize: 20, fontWeight: "700", color: Colors.textDark },

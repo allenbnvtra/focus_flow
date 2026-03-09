@@ -46,19 +46,15 @@ const CompleteScreen = () => {
       const parsedGoals = typeof goals === 'string' ? JSON.parse(goals) : goals;
       
       // Step 1: Create account with Supabase Auth
-      console.log('📝 Creating user account...');
       await signup(email, password, name);
 
       // Step 2: Update user profile with onboarding data
-      console.log('📝 Updating user profile with onboarding data...');
       await updateUserProfile({
         user_type: userType as 'individual' | 'parent' | 'guest',
         goals: parsedGoals,
         check_in_frequency: frequency,
       });
-
-      console.log('✅ Signup completed successfully!');
-
+      
       // Navigate to dashboard
       router.replace('/dashboard');
     } catch (error: any) {

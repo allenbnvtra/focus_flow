@@ -32,7 +32,7 @@ export default function LearningHub() {
     {
       id: 1,
       icon: 'game-controller-outline',
-      title: 'Memory Game',
+      title: 'GuniTap: Memory Game',
       description: 'Train your focus and memory with this fun Simon Says game. Test your concentration!',
       route: 'learning-hub/games/memory',
       colors: [Colors.purpleDark, Colors.purple, Colors.purpleLight] as const,

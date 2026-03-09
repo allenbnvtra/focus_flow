@@ -183,7 +183,7 @@ export default function Reflection() {
 
   const styles = StyleSheet.create({
     container: { flex: 1 },
-    header: { paddingHorizontal: 20, paddingTop: Platform.OS === "ios" ? 60 : 20, paddingBottom: 15 },
+    header: { paddingHorizontal: 20, paddingTop: Platform.OS === "ios" ? 20 : 20, paddingBottom: 15 },
     headerContent: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
     logoContainer: { flexDirection: "row", alignItems: "center", gap: 10 },
     logoIcon: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" },
@@ -323,7 +323,7 @@ export default function Reflection() {
 
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={styles.titleSection}>
-            <Text style={styles.pageTitle}>Reflection Space</Text>
+            <Text style={styles.pageTitle}>Munimuni Corner: Reflection and Journal Space</Text>
             <Text style={styles.pageSubtitle}>Write your thoughts</Text>
           </View>
 

@@ -54,9 +54,7 @@ export default function MemoryGame() {
 
     try {
       Vibration.vibrate(patterns[color]);
-    } catch (error) {
-      console.log('Vibration error:', error);
-    }
+    } catch (error) {}
   };
 
   const animateButton = (color: GameColor, active: boolean) => {
@@ -205,7 +203,7 @@ export default function MemoryGame() {
               </TouchableOpacity>
             )}
             <View style={[styles.header, gameStarted && !gameOver && styles.headerWithButton]}>
-              <Text style={styles.title}>Memory Game</Text>
+              <Text style={styles.title}>GuniTap: Memory Game</Text>
               <Text style={styles.subtitle}>Watch, Remember, Repeat!</Text>
             </View>
           </View>

@@ -91,12 +91,6 @@ export default function Settings() {
   const [notifications, setNotifications] = useState(true);
   const [highContrast, setHighContrast] = useState(false);
 
-  useEffect(() => {
-    if (user) {
-      console.log('User loaded:', user);
-    }
-  }, [user]);
-
   const handleDeactivate = () => {
     Alert.alert(
       'Deactivate Account',
@@ -203,7 +197,6 @@ export default function Settings() {
                 { 
                   text: 'Send Link',
                   onPress: () => {
-                    console.log('Send password reset email');
                     Alert.alert('Success', 'Password reset link sent to your email.');
                   }
                 }
@@ -270,7 +263,6 @@ export default function Settings() {
               setLoading(true);
               await logout();
               router.replace('/auth/login');
-              console.log('✅ User signed out successfully');
             } catch (error: any) {
               Alert.alert('Error', error.message || 'Failed to sign out');
             } finally {

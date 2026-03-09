@@ -147,30 +147,6 @@ export default function EditProfile() {
     );
   };
 
-  const handleChangeAvatar = () => {
-    Alert.alert(
-      'Change Profile Picture',
-      'Choose an option:',
-      [
-        {
-          text: 'Take Photo',
-          onPress: () => {
-            console.log('Take photo');
-            Alert.alert('Coming Soon', 'Camera feature will be available soon!');
-          },
-        },
-        {
-          text: 'Choose from Library',
-          onPress: () => {
-            console.log('Choose from library');
-            Alert.alert('Coming Soon', 'Photo library will be available soon!');
-          },
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
-  };
-
   const handleDiscardChanges = () => {
     if (!hasChanges) {
       router.back();
