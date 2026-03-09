@@ -4,11 +4,16 @@ import { Platform } from 'react-native';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-export const BACKGROUND_TASK_NAME = 'focusflow-background-check';
-const UNDONE_TASK_CHANNEL = 'undone-tasks';
-const STREAK_CHANNEL      = 'streak-reminder';
-const TIMER_CHANNEL       = 'active-timer';
-const NOTIF_PERM_KEY      = 'focusflow_notif_permissions';
+export const BACKGROUND_TASK_NAME  = 'focusflow-background-check';
+const UNDONE_TASK_CHANNEL  = 'undone-tasks';
+const STREAK_CHANNEL       = 'streak-reminder';
+const MOOD_CHANNEL         = 'mood-checkin';
+const TIMER_CHANNEL        = 'active-timer';
+const NOTIF_PERM_KEY       = 'focusflow_notif_permissions';
+
+// Storage keys to track if mood was already logged today
+export const MOOD_MORNING_KEY   = 'focusflow_mood_morning';
+export const MOOD_AFTERNOON_KEY = 'focusflow_mood_afternoon';
 
 // ─── Notification handler ─────────────────────────────────────────────────────
 
@@ -60,6 +65,13 @@ export async function setupNotificationChannels() {
     lightColor: '#FF9800',
   });
 
+  await Notifications.setNotificationChannelAsync(MOOD_CHANNEL, {
+    name: 'Mood Check-ins',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    vibrationPattern: [0, 200],
+    lightColor: '#7C4DFF',
+  });
+
   await Notifications.setNotificationChannelAsync(TIMER_CHANNEL, {
     name: 'Active Timer',
     importance: Notifications.AndroidImportance.LOW,
@@ -69,12 +81,6 @@ export async function setupNotificationChannels() {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getGreeting(hour: number): string {
-  if (hour < 12) return 'Good morning';
-  if (hour < 17) return 'Good afternoon';
-  return 'Good evening';
-}
 
 function getTodayAt(hour: number, minute = 0): Date {
   const d = new Date();
@@ -99,7 +105,7 @@ async function scheduleIfFuture(
 ) {
   const now      = new Date();
   const fireTime = getTodayAt(hour, minute);
-  if (fireTime <= now) return; // already passed today — skip
+  if (fireTime <= now) return;
 
   await Notifications.scheduleNotificationAsync({
     identifier,
@@ -113,41 +119,99 @@ async function scheduleIfFuture(
   console.log(`✅ Scheduled [${identifier}] at ${fireTime.toLocaleTimeString()}`);
 }
 
+// ─── Check if mood already logged today ───────────────────────────────────────
+
+export async function hasMoodForToday(period: 'morning' | 'afternoon'): Promise<boolean> {
+  try {
+    const key   = period === 'morning' ? MOOD_MORNING_KEY : MOOD_AFTERNOON_KEY;
+    const raw   = await AsyncStorage.getItem(key);
+    if (!raw) return false;
+    const { date } = JSON.parse(raw);
+    const today = new Date().toISOString().split('T')[0];
+    return date === today;
+  } catch {
+    return false;
+  }
+}
+
+export async function markMoodLogged(period: 'morning' | 'afternoon') {
+  const key   = period === 'morning' ? MOOD_MORNING_KEY : MOOD_AFTERNOON_KEY;
+  const today = new Date().toISOString().split('T')[0];
+  await AsyncStorage.setItem(key, JSON.stringify({ date: today }));
+}
+
+// ─── Schedule mood check-in notifications ────────────────────────────────────
+//  9:00 AM  — Morning mood check-in
+//  2:00 PM  — Afternoon mood check-in
+
+export async function scheduleMoodCheckInNotifications(
+  userName: string,
+  morningDone: boolean,
+  afternoonDone: boolean,
+) {
+  await cancelNotificationsWithTag('mood-morning');
+  await cancelNotificationsWithTag('mood-afternoon');
+
+  const name = userName || 'there';
+
+  // 9:00 AM morning mood
+  if (!morningDone) {
+    await scheduleIfFuture(
+      `mood-morning-${Date.now()}`,
+      {
+        title: `☀️ Good morning, ${name}!`,
+        body: "How are you feeling today? Log your morning mood to track your wellbeing 😊",
+        data: { type: 'mood-checkin', period: 'morning' },
+        ...(Platform.OS === 'android' && { channelId: MOOD_CHANNEL }),
+      },
+      9, 0,
+    );
+  }
+
+  // 2:00 PM afternoon mood
+  if (!afternoonDone) {
+    await scheduleIfFuture(
+      `mood-afternoon-${Date.now()}`,
+      {
+        title: `🌤 Afternoon check-in, ${name}!`,
+        body: "How's your energy this afternoon? Take a second to log your mood 🧠",
+        data: { type: 'mood-checkin', period: 'afternoon' },
+        ...(Platform.OS === 'android' && { channelId: MOOD_CHANNEL }),
+      },
+      14, 0,
+    );
+  }
+}
+
 // ─── Schedule all daily reminders ────────────────────────────────────────────
-//
-//  7:00 AM  — Morning greeting + set your tasks for the day
-// 12:00 PM  — Midday check-in (pending tasks or no tasks set yet)
-//  5:00 PM  — Afternoon nudge
-//  8:00 PM  — Evening wind-down reminder
-// 10:17 PM  — Streak reminder (if no focus activity today)
-//              Change to 9 PM (21, 0) in production
-//
-// Call this on every app open with fresh data from Supabase.
 
 export async function scheduleAllDailyReminders({
   userName,
   incompleteTasks,
   hasTasksToday,
   hasActivityToday,
+  morningMoodDone,
+  afternoonMoodDone,
 }: {
   userName: string;
   incompleteTasks: string[];
   hasTasksToday: boolean;
   hasActivityToday: boolean;
+  morningMoodDone: boolean;
+  afternoonMoodDone: boolean;
 }) {
-  // Cancel all existing daily reminders before rescheduling
   await cancelNotificationsWithTag('daily-7am');
   await cancelNotificationsWithTag('daily-12pm');
   await cancelNotificationsWithTag('daily-5pm');
   await cancelNotificationsWithTag('daily-8pm');
   await cancelNotificationsWithTag('streak-reminder');
 
-  const name        = userName || 'there';
+  const name         = userName || 'there';
   const pendingCount = incompleteTasks.length;
-  const preview     = incompleteTasks.slice(0, 2).join(', ');
-  const extraCount  = incompleteTasks.length > 2 ? ` +${incompleteTasks.length - 2} more` : '';
+  const preview      = incompleteTasks.slice(0, 2).join(', ');
+  const extraCount   = incompleteTasks.length > 2 ? ` +${incompleteTasks.length - 2} more` : '';
 
-  // ── 7:00 AM — Morning greeting ────────────────────────────────────────────
+  // ── 7:00 AM ───────────────────────────────────────────────────────────────
   await scheduleIfFuture(
     `daily-7am-${Date.now()}`,
     {
@@ -161,7 +225,7 @@ export async function scheduleAllDailyReminders({
     7, 0,
   );
 
-  // ── 12:00 PM — Midday check-in ────────────────────────────────────────────
+  // ── 12:00 PM ──────────────────────────────────────────────────────────────
   await scheduleIfFuture(
     `daily-12pm-${Date.now()}`,
     {
@@ -177,7 +241,7 @@ export async function scheduleAllDailyReminders({
     12, 0,
   );
 
-  // ── 5:00 PM — Afternoon nudge ─────────────────────────────────────────────
+  // ── 5:00 PM ───────────────────────────────────────────────────────────────
   await scheduleIfFuture(
     `daily-5pm-${Date.now()}`,
     {
@@ -193,7 +257,7 @@ export async function scheduleAllDailyReminders({
     17, 0,
   );
 
-  // ── 8:00 PM — Evening wind-down ───────────────────────────────────────────
+  // ── 8:00 PM ───────────────────────────────────────────────────────────────
   await scheduleIfFuture(
     `daily-8pm-${Date.now()}`,
     {
@@ -209,8 +273,7 @@ export async function scheduleAllDailyReminders({
     20, 0,
   );
 
-  // ── 10:17 PM — Streak reminder (only if no focus activity today) ──────────
-  // Change to (21, 0) for 9 PM in production
+  // ── Streak reminder (9 PM, only if no focus activity) ────────────────────
   if (!hasActivityToday) {
     await scheduleIfFuture(
       `streak-reminder-${Date.now()}`,
@@ -220,27 +283,26 @@ export async function scheduleAllDailyReminders({
         data: { type: 'streak-reminder' },
         ...(Platform.OS === 'android' && { channelId: STREAK_CHANNEL }),
       },
-      22, 17, // ← change to 21, 0 for 9 PM in production
+      21, 0,
     );
   }
+
+  // ── Mood check-in notifications ───────────────────────────────────────────
+  await scheduleMoodCheckInNotifications(name, morningMoodDone, afternoonMoodDone);
 }
 
-// ─── Legacy exports (still used by focus-tracker.tsx useEffects) ──────────────
-// These now just re-call scheduleAllDailyReminders with minimal data so the
-// focus-tracker hooks continue working without needing to be changed.
+// ─── Legacy exports ───────────────────────────────────────────────────────────
 
-export async function scheduleUndoneTaskReminder(incompleteTasks: string[]) {
-  // Handled by scheduleAllDailyReminders — this is a no-op kept for compatibility
-  // The full scheduling happens on app open in _layout.tsx
+export async function scheduleUndoneTaskReminder(_incompleteTasks: string[]) {
+  // No-op — handled by scheduleAllDailyReminders
 }
 
 export async function scheduleStreakReminder(hasActivityToday: boolean) {
-  // Handled by scheduleAllDailyReminders — this is a no-op kept for compatibility
   await cancelNotificationsWithTag('streak-reminder');
   if (hasActivityToday) return;
 
   const now      = new Date();
-  const reminder = getTodayAt(22, 17); // change to 21, 0 in production
+  const reminder = getTodayAt(21, 0);
   if (reminder <= now) return;
 
   await Notifications.scheduleNotificationAsync({
