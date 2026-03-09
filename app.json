@@ -3,7 +3,7 @@
     "name": "Focusflow",
     "slug": "focus_flow",
     "scheme": "focusflow",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.focusflow.focusflowapp2026",
-      "buildNumber": "8",
+      "buildNumber": "2",
       "appleTeamId": "587736ZDNK",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -24,6 +24,9 @@
           "fetch",
           "processing",
           "remote-notification"
+        ],
+        "BGTaskSchedulerPermittedIdentifiers": [
+          "focusflow-background-check"
         ]
       }
     },
@@ -53,7 +56,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/notification-icon.png",
+          "icon": "./assets/icon.png",
           "color": "#4A9B7F",
           "sounds": []
         }
