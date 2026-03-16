@@ -194,17 +194,30 @@ export default function AdminQuestions() {
       };
 
       if (editingQuestion) {
-        const { error } = await supabase.from("quiz_questions").update(payload).eq("id", editingQuestion.id);
+        const { error } = await supabase
+          .from("quiz_questions")
+          .update(payload)
+          .eq("id", editingQuestion.id);
         if (error) throw error;
+
+        setQuestions(prev =>
+          prev.map(q =>
+            q.id === editingQuestion.id
+              ? { ...editingQuestion, ...payload }
+              : q
+          )
+        );
+
+        setShowQuestionModal(false);
         Alert.alert("Success", "Question updated");
       } else {
         const { error } = await supabase.from("quiz_questions").insert(payload);
         if (error) throw error;
+
+        setShowQuestionModal(false);
+        await fetchQuestions();
         Alert.alert("Success", "Question added");
       }
-
-      setShowQuestionModal(false);
-      await fetchQuestions();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to save question");
     } finally {

@@ -1,9 +1,10 @@
 import { Stack, Redirect } from 'expo-router';
 import { useAuth } from '../../../contexts/AuthContext';
 import { View, ActivityIndicator } from 'react-native';
+import AdminDashboard from './AdminDashboard';
 
 export default function DashboardLayout() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
 
   if (isLoading) {
     return (
@@ -18,9 +19,9 @@ export default function DashboardLayout() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <Redirect href="/auth/login" />;
-  }
+  if (!isAuthenticated) return <Redirect href="/auth/login" />;
+  console.log('User Info:', user); // Debugging line to check user inforr
+  if (user?.is_admin)   return <AdminDashboard />;
 
   return (
     <Stack screenOptions={{ headerShown: false }}>

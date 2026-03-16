@@ -3,7 +3,7 @@
     "name": "Focusflow",
     "slug": "focus_flow",
     "scheme": "focusflow",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.focusflow.focusflowapp2026",
-      "buildNumber": "2",
+      "buildNumber": "1",
       "appleTeamId": "587736ZDNK",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,

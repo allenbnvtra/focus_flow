@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Background, { Colors } from '../../../components/Background';
 import { supabase } from '../../../lib/supabase';
+import { passwordResetFlag } from '../../../lib/passwordResetFlag';
 
 type Step = 'email' | 'otp' | 'newPassword';
 
@@ -36,6 +37,8 @@ export default function ForgotPassword() {
 
   const currentStepIndex = STEPS.indexOf(step);
 
+  const recoverySession = useRef<{ access_token: string; refresh_token: string } | null>(null);
+
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
   function goBack() {
@@ -57,28 +60,16 @@ export default function ForgotPassword() {
   async function handleSendOtp() {
     const trimmedEmail = email.trim();
 
-    if (!trimmedEmail) {
-      Alert.alert('Error', 'Please enter your email address.');
-      return;
-    }
+    if (!trimmedEmail) { Alert.alert('Error', 'Please enter your email address.'); return; }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(trimmedEmail)) {
-      Alert.alert('Error', 'Please enter a valid email address.');
-      return;
-    }
+    if (!emailRegex.test(trimmedEmail)) { Alert.alert('Error', 'Please enter a valid email address.'); return; }
 
     try {
       setIsLoading(true);
 
-      const { error } = await supabase.auth.signInWithOtp({
-        email: trimmedEmail,
-        options: {
-          shouldCreateUser: false,
-          emailRedirectTo: undefined,
-        },
-      });
-
+      // ✅ resetPasswordForEmail sends a RECOVERY OTP, not a login OTP
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail);
       if (error) throw error;
 
       setStep('otp');
@@ -93,21 +84,18 @@ export default function ForgotPassword() {
 
   async function handleVerifyOtp() {
     const token = otp.join('');
-
-    if (token.length < OTP_LENGTH) {
-      Alert.alert('Error', 'Please enter the complete 6-digit OTP.');
-      return;
-    }
+    if (token.length < OTP_LENGTH) { Alert.alert('Error', 'Please enter the complete 6-digit OTP.'); return; }
 
     try {
       setIsLoading(true);
 
+      // ✅ type: 'recovery' — Supabase returns a session but fires PASSWORD_RECOVERY
+      //    event, NOT SIGNED_IN, so AuthContext won't redirect to home
       const { error } = await supabase.auth.verifyOtp({
         email: email.trim(),
         token,
-        type: 'email',
+        type: 'recovery',   // 🔑 was 'email' — that's what caused the auto-login
       });
-
       if (error) throw error;
 
       setStep('newPassword');
@@ -121,27 +109,18 @@ export default function ForgotPassword() {
   // ── Step 3: Update Password ──────────────────────────────────────────────────
 
   async function handleUpdatePassword() {
-    if (!password) {
-      Alert.alert('Error', 'Please enter a new password.');
-      return;
-    }
-
-    if (password.length < 8) {
-      Alert.alert('Error', 'Password must be at least 8 characters long.');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match.');
-      return;
-    }
+    if (!password) { Alert.alert('Error', 'Please enter a new password.'); return; }
+    if (password.length < 8) { Alert.alert('Error', 'Password must be at least 8 characters long.'); return; }
+    if (password !== confirmPassword) { Alert.alert('Error', 'Passwords do not match.'); return; }
 
     try {
       setIsLoading(true);
 
       const { error } = await supabase.auth.updateUser({ password });
-
       if (error) throw error;
+
+      // Sign out cleanly so user lands on login screen
+      await supabase.auth.signOut();
 
       Alert.alert('Success', 'Your password has been reset successfully.', [
         { text: 'Login', onPress: () => router.replace('/') },

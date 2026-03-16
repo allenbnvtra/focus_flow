@@ -191,16 +191,50 @@ export default function Reflection() {
   useEffect(() => {
     let qCh: RealtimeChannel | null = null;
     let cCh: RealtimeChannel | null = null;
+
     const setup = async () => {
       await fetchQuestions();
-      qCh = supabase.channel("quiz_q_rt")
-        .on("postgres_changes", { event: "*", schema: "public", table: "quiz_questions" }, () => fetchQuestions())
+
+      qCh = supabase
+        .channel("quiz_q_rt")
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "quiz_questions" },
+          (payload) => {
+            const updated = payload.new as QuizQuestion;
+            setQuestions((prev) => {
+              const idx = prev.findIndex((q) => q.id === updated.id);
+              if (idx === -1) return prev;
+              const next = [...prev];
+              next[idx] = { ...next[idx], ...updated };
+              return next;
+            });
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "quiz_questions" },
+          () => fetchQuestions()
+        )
+        .on(
+          "postgres_changes",
+          { event: "DELETE", schema: "public", table: "quiz_questions" },
+          () => fetchQuestions()
+        )
         .subscribe();
-      cCh = supabase.channel("quiz_c_rt")
-        .on("postgres_changes", { event: "*", schema: "public", table: "quiz_categories" }, () => fetchQuestions())
+
+      cCh = supabase
+        .channel("quiz_c_rt")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "quiz_categories" },
+          () => fetchQuestions()
+        )
         .subscribe();
     };
+
     setup();
+
     return () => {
       if (qCh) supabase.removeChannel(qCh);
       if (cCh) supabase.removeChannel(cCh);
