@@ -37,6 +37,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
+      "versionCode": 2,
       "package": "com.focusflow.focusflowapp2026",
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
