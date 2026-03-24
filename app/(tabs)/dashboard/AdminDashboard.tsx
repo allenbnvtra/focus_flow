@@ -29,6 +29,8 @@ interface StudentSummary {
   sessionCount: number;
   currentStreak: number;
   hasMoodAlert: boolean;
+  bestGameScore: number;        // all-time personal best across all games
+  gamesToday: number;           // how many game sessions played today
 }
 
 interface SessionEntry {
@@ -47,10 +49,19 @@ interface ReflectionEntry {
   question_type: string;
 }
 
+interface GameScoreEntry {
+  id: string;
+  game_name: string;
+  score: number;
+  session_date: string;         // YYYY-MM-DD
+  created_at: string;
+}
+
 interface StudentDetail {
   moods: MoodEntry[];
   sessions: SessionEntry[];
   reflections: ReflectionEntry[];
+  gameScores: GameScoreEntry[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -81,6 +92,16 @@ const nDaysAgo = (n: number) => {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 };
 
+const getLocalToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+};
+
+const GAME_LABELS: Record<string, string> = {
+  memory_game: 'Memory Game',
+};
+const gameLabel = (name: string) => GAME_LABELS[name] ?? name.replace(/_/g, ' ');
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
@@ -96,7 +117,7 @@ export default function AdminDashboard() {
   const [selected, setSelected]               = useState<StudentSummary | null>(null);
   const [detail, setDetail]                   = useState<StudentDetail | null>(null);
   const [detailLoading, setDetailLoading]     = useState(false);
-  const [detailTab, setDetailTab]             = useState<'overview' | 'moods' | 'sessions' | 'reflections'>('overview');
+  const [detailTab, setDetailTab]             = useState<'overview' | 'moods' | 'sessions' | 'reflections' | 'games'>('overview');
 
   useEffect(() => { fetchStudents(); }, []);
 
@@ -108,9 +129,8 @@ export default function AdminDashboard() {
       const dayStart = localDayStart();
       const dayEnd   = localDayEnd();
       const weekAgo  = nDaysAgo(7);
+      const today    = getLocalToday();
 
-      // 1. Non-admin profiles
-      // ⚠️ Adjust table/column names to match your Supabase schema
       const { data: profiles, error: pErr } = await supabase
         .from('users')
         .select('id, name, email')
@@ -118,12 +138,10 @@ export default function AdminDashboard() {
         .order('name');
       if (pErr) throw pErr;
 
-      console.log(profiles)
-
       const ids = (profiles || []).map(p => p.id);
       if (!ids.length) { setStudents([]); return; }
 
-      const [moodsRes, tasksRes, sessRes] = await Promise.all([
+      const [moodsRes, tasksRes, sessRes, gameRes] = await Promise.all([
         supabase.from('daily_moods')
           .select('user_id, mood_value, mood_date, notes')
           .in('user_id', ids)
@@ -141,6 +159,12 @@ export default function AdminDashboard() {
           .in('user_id', ids)
           .gte('completed_at', `${weekAgo}T00:00:00`)
           .order('completed_at', { ascending: false }),
+
+        // Fetch game scores: last 7 days (for daily breakdown) + all-time best
+        supabase.from('game_scores')
+          .select('user_id, game_name, score, session_date, created_at')
+          .in('user_id', ids)
+          .order('score', { ascending: false }),
       ]);
 
       const summaries: StudentSummary[] = (profiles || []).map(profile => {
@@ -149,6 +173,7 @@ export default function AdminDashboard() {
           .map(m => ({ mood_value: m.mood_value, mood_date: m.mood_date, notes: m.notes }));
         const pTasks = (tasksRes.data || []).filter(t => t.user_id === profile.id);
         const pSess  = (sessRes.data  || []).filter(s => s.user_id === profile.id);
+        const pGames = (gameRes.data  || []).filter(g => g.user_id === profile.id);
 
         const weekSecs  = pSess.reduce((a, s) => a + (s.duration_minutes || 0), 0);
         const recentAvg = pMoods.length > 0
@@ -156,7 +181,6 @@ export default function AdminDashboard() {
           : 0;
         const hasMoodAlert = recentAvg > 3.5 || (pMoods.length === 0 && pSess.length > 0);
 
-        // streak from session dates
         const dates = [...new Set(pSess.map(s => s.completed_at.split('T')[0]))].sort().reverse();
         let streak = 0;
         for (let i = 0; i < dates.length; i++) {
@@ -164,6 +188,13 @@ export default function AdminDashboard() {
           const ds = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
           if (dates.includes(ds)) streak++; else break;
         }
+
+        const bestGameScore = pGames.length > 0
+          ? Math.max(...pGames.map(g => g.score))
+          : 0;
+        const gamesToday = pGames.filter(g =>
+          (g.session_date ?? g.created_at?.split('T')[0]) === today
+        ).length;
 
         return {
           id: profile.id,
@@ -176,6 +207,8 @@ export default function AdminDashboard() {
           sessionCount:    pSess.length,
           currentStreak:   streak,
           hasMoodAlert,
+          bestGameScore,
+          gamesToday,
         };
       });
 
@@ -188,14 +221,14 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  // ─── Fetch detail (lazy, on student tap) ─────────────────────────────────
+  // ─── Fetch detail ─────────────────────────────────────────────────────────
 
   const fetchDetail = async (userId: string) => {
     try {
       setDetailLoading(true);
       const ago30 = nDaysAgo(30);
 
-      const [mRes, sRes, rRes] = await Promise.all([
+      const [mRes, sRes, rRes, gRes] = await Promise.all([
         supabase.from('daily_moods')
           .select('mood_value, mood_date, notes')
           .eq('user_id', userId)
@@ -214,6 +247,12 @@ export default function AdminDashboard() {
           .eq('user_id', userId)
           .order('attempted_at', { ascending: false })
           .limit(30),
+
+        supabase.from('game_scores')
+          .select('id, game_name, score, session_date, created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(100),
       ]);
 
       setDetail({
@@ -230,6 +269,11 @@ export default function AdminDashboard() {
           attempted_at: r.attempted_at,
           question_text: r.quiz_questions?.question    ?? 'Unknown question',
           question_type: r.quiz_questions?.question_type ?? 'reflection',
+        })),
+        gameScores: (gRes.data || []).map((g: any) => ({
+          id: g.id, game_name: g.game_name, score: g.score,
+          session_date: g.session_date ?? g.created_at?.split('T')[0],
+          created_at: g.created_at,
         })),
       });
     } catch (e: any) {
@@ -255,7 +299,7 @@ export default function AdminDashboard() {
       s.name.toLowerCase().includes(search.toLowerCase()) ||
       s.email.toLowerCase().includes(search.toLowerCase()));
 
-  // ─── Tab content renderers ────────────────────────────────────────────────
+  // ─── Tab renderers ────────────────────────────────────────────────────────
 
   const renderOverview = () => {
     if (!selected) return null;
@@ -267,13 +311,15 @@ export default function AdminDashboard() {
     return (
       <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
 
-        {/* 4-stat grid */}
+        {/* 6-stat grid (added Best Score + Games Today) */}
         <View style={styles.overviewGrid}>
           {[
-            { icon: 'flame-outline',          val: `${selected.currentStreak}d`,                   label: 'Streak'       },
-            { icon: 'timer-outline',           val: formatSecs(selected.weekFocusSecs),             label: 'This Week'    },
-            { icon: 'checkmark-done-outline',  val: `${selected.todayTasksDone}/${selected.todayTasksTotal}`, label: "Today's Tasks" },
-            { icon: 'happy-outline',           val: avgMood !== null ? avgMood.toFixed(1) : 'N/A',  label: 'Avg Mood'     },
+            { icon: 'flame-outline',         val: `${selected.currentStreak}d`,                                    label: 'Streak'       },
+            { icon: 'timer-outline',          val: formatSecs(selected.weekFocusSecs),                              label: 'This Week'    },
+            { icon: 'checkmark-done-outline', val: `${selected.todayTasksDone}/${selected.todayTasksTotal}`,        label: "Today's Tasks"},
+            { icon: 'happy-outline',          val: avgMood !== null ? avgMood.toFixed(1) : 'N/A',                   label: 'Avg Mood'     },
+            { icon: 'trophy-outline',         val: selected.bestGameScore > 0 ? `Lvl ${selected.bestGameScore}` : '—', label: 'Best Score'},
+            { icon: 'game-controller-outline',val: String(selected.gamesToday),                                     label: 'Plays Today'  },
           ].map(({ icon, val, label }) => (
             <View key={label} style={styles.overviewCard}>
               <Ionicons name={icon as any} size={22} color={Colors.primary} />
@@ -283,7 +329,7 @@ export default function AdminDashboard() {
           ))}
         </View>
 
-        {/* Mood alert banner */}
+        {/* Mood alert */}
         {selected.hasMoodAlert && (
           <View style={styles.alertBanner}>
             <Ionicons name="warning-outline" size={18} color="#FF6B6B" />
@@ -323,10 +369,7 @@ export default function AdminDashboard() {
                   <View style={styles.moodBarTrack}>
                     <View style={[
                       styles.moodBarFill,
-                      {
-                        height: `${(m.mood_value / 5) * 100}%`,
-                        backgroundColor: getMoodColor(m.mood_value),
-                      },
+                      { height: `${(m.mood_value / 5) * 100}%`, backgroundColor: getMoodColor(m.mood_value) },
                     ]} />
                   </View>
                   <Text style={styles.moodBarDate}>{m.mood_date.slice(5)}</Text>
@@ -442,20 +485,109 @@ export default function AdminDashboard() {
     );
   };
 
-  // ─── Student detail screen ────────────────────────────────────────────────
+  // ─── Games tab ────────────────────────────────────────────────────────────
+
+  const renderGames = () => {
+    if (detailLoading || !detail) return <ActivityIndicator style={styles.tabLoader} size="large" color={Colors.primary} />;
+    if (!detail.gameScores.length) return <Text style={styles.tabEmpty}>No game sessions recorded yet</Text>;
+
+    // Per-game best scores
+    const bestPerGame: Record<string, number> = {};
+    for (const g of detail.gameScores) {
+      if (!bestPerGame[g.game_name] || g.score > bestPerGame[g.game_name])
+        bestPerGame[g.game_name] = g.score;
+    }
+
+    // Group sessions by date (YYYY-MM-DD)
+    const byDate: Record<string, GameScoreEntry[]> = {};
+    for (const g of detail.gameScores) {
+      const key = g.session_date ?? g.created_at.split('T')[0];
+      if (!byDate[key]) byDate[key] = [];
+      byDate[key].push(g);
+    }
+    const sortedDates = Object.keys(byDate).sort().reverse();
+
+    return (
+      <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
+
+        {/* Best scores summary cards */}
+        <Text style={styles.sectionLabel}>All-Time Best</Text>
+        <View style={styles.gameBestRow}>
+          {Object.entries(bestPerGame).map(([name, score]) => (
+            <View key={name} style={styles.gameBestCard}>
+              <Ionicons name="trophy" size={20} color="#FFC107" />
+              <Text style={styles.gameBestScore}>Lvl {score}</Text>
+              <Text style={styles.gameBestName}>{gameLabel(name)}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Day-by-day breakdown */}
+        <Text style={[styles.sectionLabel, { marginTop: 8 }]}>Daily History</Text>
+        {sortedDates.map(date => {
+          const daySessions = byDate[date];
+          const dayBest = Math.max(...daySessions.map(g => g.score));
+          return (
+            <View key={date} style={styles.gameDayBlock}>
+              {/* Date header */}
+              <View style={styles.gameDayHeader}>
+                <View style={styles.gameDayHeaderLeft}>
+                  <Ionicons name="calendar-outline" size={14} color={Colors.primary} />
+                  <Text style={styles.gameDayDate}>{date}</Text>
+                </View>
+                <View style={styles.gameDayMeta}>
+                  <Text style={styles.gameDayCount}>{daySessions.length} play{daySessions.length !== 1 ? 's' : ''}</Text>
+                  <View style={styles.gameDayBestPill}>
+                    <Ionicons name="star" size={11} color="#FFC107" />
+                    <Text style={styles.gameDayBestText}>Best: Lvl {dayBest}</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Individual plays */}
+              {daySessions.map((g, i) => (
+                <View key={g.id} style={styles.gamePlayRow}>
+                  <View style={styles.gamePlayNum}>
+                    <Text style={styles.gamePlayNumText}>#{i + 1}</Text>
+                  </View>
+                  <Text style={styles.gamePlayName}>{gameLabel(g.game_name)}</Text>
+                  <View style={[
+                    styles.gameScorePill,
+                    g.score === dayBest && styles.gameScorePillBest,
+                  ]}>
+                    <Text style={[
+                      styles.gameScoreText,
+                      g.score === dayBest && styles.gameScoreTextBest,
+                    ]}>
+                      Lvl {g.score}
+                    </Text>
+                    {g.score === dayBest && (
+                      <Ionicons name="star" size={11} color="#FFC107" />
+                    )}
+                  </View>
+                </View>
+              ))}
+            </View>
+          );
+        })}
+      </ScrollView>
+    );
+  };
+
+  // ─── Detail screen ────────────────────────────────────────────────────────
 
   const renderDetail = () => {
     if (!selected) return null;
     const TABS = [
-      { key: 'overview',     label: 'Overview',     icon: 'grid-outline'      },
-      { key: 'moods',        label: 'Moods',        icon: 'happy-outline'     },
-      { key: 'sessions',     label: 'Sessions',     icon: 'timer-outline'     },
-      { key: 'reflections',  label: 'Reflections',  icon: 'create-outline'    },
+      { key: 'overview',    label: 'Overview',    icon: 'grid-outline'           },
+      { key: 'moods',       label: 'Moods',       icon: 'happy-outline'          },
+      { key: 'sessions',    label: 'Sessions',    icon: 'timer-outline'          },
+      { key: 'reflections', label: 'Reflections', icon: 'create-outline'         },
+      { key: 'games',       label: 'Games',       icon: 'game-controller-outline'},
     ] as const;
 
     return (
       <View style={styles.detailWrap}>
-        {/* Detail header */}
         <View style={styles.detailHeader}>
           <TouchableOpacity style={styles.backBtn} onPress={() => setSelected(null)}>
             <Ionicons name="arrow-back" size={22} color={Colors.primary} />
@@ -477,7 +609,6 @@ export default function AdminDashboard() {
           )}
         </View>
 
-        {/* Tab bar */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBarScroll} contentContainerStyle={styles.tabBar}>
           {TABS.map(tab => (
             <TouchableOpacity
@@ -493,12 +624,12 @@ export default function AdminDashboard() {
           ))}
         </ScrollView>
 
-        {/* Tab content */}
         <View style={{ flex: 1 }}>
           {detailTab === 'overview'    && renderOverview()}
           {detailTab === 'moods'       && renderMoods()}
           {detailTab === 'sessions'    && renderSessions()}
           {detailTab === 'reflections' && renderReflections()}
+          {detailTab === 'games'       && renderGames()}
         </View>
       </View>
     );
@@ -517,7 +648,6 @@ export default function AdminDashboard() {
     >
       <Text style={styles.pageTitle}>Student Monitor</Text>
 
-      {/* Summary pills */}
       <View style={styles.pillsRow}>
         <View style={styles.pill}>
           <Ionicons name="people-outline" size={16} color={Colors.primary} />
@@ -532,7 +662,6 @@ export default function AdminDashboard() {
         )}
       </View>
 
-      {/* Search + filter */}
       <View style={styles.searchRow}>
         <View style={styles.searchBox}>
           <Ionicons name="search-outline" size={17} color={Colors.textLight} />
@@ -576,13 +705,10 @@ export default function AdminDashboard() {
               onPress={() => handleSelect(student)}
               activeOpacity={0.8}
             >
-              {/* Left accent bar */}
               <View style={[styles.cardAccent, {
                 backgroundColor: latestMood ? getMoodColor(latestMood.mood_value) : Colors.textLight,
               }]} />
-
               <View style={styles.cardBody}>
-                {/* Row 1: avatar + name + chevron */}
                 <View style={styles.cardTopRow}>
                   <LinearGradient
                     colors={student.hasMoodAlert ? ['#FF6B6B', '#FF8A80'] : [Colors.primary, Colors.primaryDark ?? Colors.primary]}
@@ -605,7 +731,6 @@ export default function AdminDashboard() {
                   <Ionicons name="chevron-forward" size={18} color={Colors.textLight} />
                 </View>
 
-                {/* Mood dots */}
                 {student.recentMoods.length > 0 ? (
                   <View style={styles.moodDotsRow}>
                     <Text style={styles.moodDotsLabel}>7-day mood:</Text>
@@ -620,7 +745,6 @@ export default function AdminDashboard() {
                   <Text style={styles.noMoodText}>No mood logs yet</Text>
                 )}
 
-                {/* Stats chips */}
                 <View style={styles.chipsRow}>
                   <View style={styles.chip}>
                     <Ionicons name="checkmark-circle-outline" size={12} color={Colors.primary} />
@@ -634,6 +758,19 @@ export default function AdminDashboard() {
                     <View style={styles.chip}>
                       <Text style={{ fontSize: 11 }}>🔥</Text>
                       <Text style={styles.chipText}>{student.currentStreak}d streak</Text>
+                    </View>
+                  )}
+                  {/* Game chips */}
+                  {student.bestGameScore > 0 && (
+                    <View style={[styles.chip, styles.chipGame]}>
+                      <Ionicons name="trophy-outline" size={12} color="#FFC107" />
+                      <Text style={[styles.chipText, { color: '#B8860B' }]}>Best Lvl {student.bestGameScore}</Text>
+                    </View>
+                  )}
+                  {student.gamesToday > 0 && (
+                    <View style={[styles.chip, styles.chipGame]}>
+                      <Ionicons name="game-controller-outline" size={12} color="#FFC107" />
+                      <Text style={[styles.chipText, { color: '#B8860B' }]}>{student.gamesToday} play{student.gamesToday !== 1 ? 's' : ''} today</Text>
                     </View>
                   )}
                 </View>
@@ -650,7 +787,6 @@ export default function AdminDashboard() {
   return (
     <Background>
       <View style={styles.container}>
-        {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerRow}>
             <LinearGradient colors={[Colors.primary, Colors.primaryDark ?? Colors.primary]} style={styles.logoIcon}>
@@ -683,16 +819,16 @@ const styles = StyleSheet.create({
   scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
   pageTitle:     { fontSize: 28, fontWeight: '800', color: Colors.textDark, marginBottom: 14 },
 
-  pillsRow:      { flexDirection: 'row', gap: 10, marginBottom: 14, flexWrap: 'wrap' },
-  pill:          { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.white, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#E8E8E8' },
-  pillText:      { fontSize: 13, fontWeight: '600', color: Colors.textMedium },
-  pillAlert:     { borderColor: '#FF6B6B', backgroundColor: 'rgba(255,107,107,0.06)' },
+  pillsRow:        { flexDirection: 'row', gap: 10, marginBottom: 14, flexWrap: 'wrap' },
+  pill:            { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.white, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#E8E8E8' },
+  pillText:        { fontSize: 13, fontWeight: '600', color: Colors.textMedium },
+  pillAlert:       { borderColor: '#FF6B6B', backgroundColor: 'rgba(255,107,107,0.06)' },
   pillAlertActive: { backgroundColor: 'rgba(255,107,107,0.15)' },
 
-  searchRow:     { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  searchBox:     { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.white, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: '#E8E8E8' },
-  searchInput:   { flex: 1, fontSize: 15, color: Colors.textDark },
-  filterBtn:     { width: 48, height: 48, borderRadius: 14, backgroundColor: Colors.white, borderWidth: 1, borderColor: '#E8E8E8', alignItems: 'center', justifyContent: 'center' },
+  searchRow:       { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  searchBox:       { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.white, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: '#E8E8E8' },
+  searchInput:     { flex: 1, fontSize: 15, color: Colors.textDark },
+  filterBtn:       { width: 48, height: 48, borderRadius: 14, backgroundColor: Colors.white, borderWidth: 1, borderColor: '#E8E8E8', alignItems: 'center', justifyContent: 'center' },
   filterBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
 
   loaderWrap: { paddingVertical: 60, alignItems: 'center' },
@@ -718,11 +854,12 @@ const styles = StyleSheet.create({
   moodLatest:    { fontSize: 12, fontWeight: '600', color: Colors.textMedium, marginLeft: 4 },
   noMoodText:    { fontSize: 12, color: Colors.textLight, fontStyle: 'italic' },
 
-  chipsRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  chip:     { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(74,155,127,0.08)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
-  chipText: { fontSize: 11, fontWeight: '600', color: Colors.textMedium },
+  chipsRow:  { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  chip:      { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(74,155,127,0.08)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
+  chipText:  { fontSize: 11, fontWeight: '600', color: Colors.textMedium },
+  chipGame:  { backgroundColor: 'rgba(255,193,7,0.12)' },
 
-  // ── Detail ────────────────────────────────────────────────────────────────
+  // Detail
   detailWrap:       { flex: 1 },
   detailHeader:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingBottom: 14 },
   backBtn:          { width: 40, height: 40, borderRadius: 11, backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E8E8E8' },
@@ -734,12 +871,12 @@ const styles = StyleSheet.create({
   detailAlertPill:  { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FF6B6B', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
   detailAlertText:  { fontSize: 11, fontWeight: '700', color: Colors.white },
 
-  tabBarScroll: { maxHeight: 52, flexGrow: 0 },
-  tabBar:       { flexDirection: 'row', gap: 6, paddingHorizontal: 20, paddingBottom: 10 },
-  tabBtn:       { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, backgroundColor: Colors.white, borderWidth: 1, borderColor: '#E8E8E8' },
-  tabBtnActive: { backgroundColor: 'rgba(74,155,127,0.12)', borderColor: Colors.primary },
-  tabBtnText:   { fontSize: 13, fontWeight: '600', color: Colors.textLight },
-  tabBtnTextActive: { color: Colors.primary, fontWeight: '700' },
+  tabBarScroll:    { maxHeight: 52, flexGrow: 0 },
+  tabBar:          { flexDirection: 'row', gap: 6, paddingHorizontal: 20, paddingBottom: 10 },
+  tabBtn:          { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, backgroundColor: Colors.white, borderWidth: 1, borderColor: '#E8E8E8' },
+  tabBtnActive:    { backgroundColor: 'rgba(74,155,127,0.12)', borderColor: Colors.primary },
+  tabBtnText:      { fontSize: 13, fontWeight: '600', color: Colors.textLight },
+  tabBtnTextActive:{ color: Colors.primary, fontWeight: '700' },
 
   tabContent: { paddingHorizontal: 20, paddingBottom: 60, gap: 12 },
   tabEmpty:   { textAlign: 'center', marginTop: 40, fontSize: 14, color: Colors.textLight, paddingHorizontal: 40 },
@@ -762,13 +899,13 @@ const styles = StyleSheet.create({
 
   sectionLabel: { fontSize: 13, fontWeight: '700', color: Colors.textMedium, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
 
-  moodBarCard:     { backgroundColor: Colors.white, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#E8E8E8' },
-  moodBarRow:      { flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 80 },
-  moodBarCol:      { flex: 1, alignItems: 'center', gap: 4 },
-  moodBarTrack:    { width: '100%', flex: 1, backgroundColor: '#F0F0F0', borderRadius: 4, overflow: 'hidden', justifyContent: 'flex-end' },
-  moodBarFill:     { width: '100%', borderRadius: 4 },
-  moodBarDate:     { fontSize: 9, color: Colors.textLight, fontWeight: '600' },
-  moodBarLegend:   { flexDirection: 'row', gap: 12, marginTop: 10, flexWrap: 'wrap' },
+  moodBarCard:       { backgroundColor: Colors.white, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#E8E8E8' },
+  moodBarRow:        { flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 80 },
+  moodBarCol:        { flex: 1, alignItems: 'center', gap: 4 },
+  moodBarTrack:      { width: '100%', flex: 1, backgroundColor: '#F0F0F0', borderRadius: 4, overflow: 'hidden', justifyContent: 'flex-end' },
+  moodBarFill:       { width: '100%', borderRadius: 4 },
+  moodBarDate:       { fontSize: 9, color: Colors.textLight, fontWeight: '600' },
+  moodBarLegend:     { flexDirection: 'row', gap: 12, marginTop: 10, flexWrap: 'wrap' },
   moodBarLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   moodBarLegendDot:  { width: 8, height: 8, borderRadius: 4 },
   moodBarLegendText: { fontSize: 10, color: Colors.textLight, fontWeight: '600' },
@@ -782,13 +919,13 @@ const styles = StyleSheet.create({
   moodEntryNotes:  { fontSize: 13, color: Colors.textMedium, marginTop: 4, fontStyle: 'italic', lineHeight: 18 },
 
   // Sessions tab
-  sessTotalRow:   { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(74,155,127,0.08)', borderRadius: 12, padding: 12 },
-  sessTotalText:  { fontSize: 13, fontWeight: '700', color: Colors.primary },
-  sessEntry:      { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: Colors.white, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#E8E8E8' },
-  sessEntryDot:   { width: 8, height: 8, borderRadius: 4, flexShrink: 0 },
-  sessEntryTask:  { fontSize: 14, fontWeight: '600', color: Colors.textDark },
-  sessEntryMeta:  { fontSize: 11, color: Colors.textLight, marginTop: 2 },
-  sessEntryDur:   { fontSize: 14, fontWeight: '800', color: Colors.primary },
+  sessTotalRow:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(74,155,127,0.08)', borderRadius: 12, padding: 12 },
+  sessTotalText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  sessEntry:     { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: Colors.white, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#E8E8E8' },
+  sessEntryDot:  { width: 8, height: 8, borderRadius: 4, flexShrink: 0 },
+  sessEntryTask: { fontSize: 14, fontWeight: '600', color: Colors.textDark },
+  sessEntryMeta: { fontSize: 11, color: Colors.textLight, marginTop: 2 },
+  sessEntryDur:  { fontSize: 14, fontWeight: '800', color: Colors.primary },
 
   // Reflections tab
   reflCard:        { backgroundColor: Colors.white, borderRadius: 16, padding: 16, gap: 10, borderWidth: 1, borderColor: '#E8E8E8' },
@@ -803,4 +940,28 @@ const styles = StyleSheet.create({
   ratingRow:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
   ratingPip:       { width: 18, height: 18, borderRadius: 9, backgroundColor: '#E0E0E0' },
   ratingText:      { fontSize: 14, fontWeight: '800', color: '#FF9800', marginLeft: 6 },
+
+  // Games tab
+  gameBestRow:       { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
+  gameBestCard:      { flex: 1, minWidth: '45%', backgroundColor: 'rgba(255,193,7,0.1)', borderRadius: 16, padding: 16, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: 'rgba(255,193,7,0.3)' },
+  gameBestScore:     { fontSize: 22, fontWeight: '800', color: Colors.textDark },
+  gameBestName:      { fontSize: 11, fontWeight: '600', color: Colors.textMedium, textTransform: 'uppercase', textAlign: 'center' },
+
+  gameDayBlock:      { backgroundColor: Colors.white, borderRadius: 16, borderWidth: 1, borderColor: '#E8E8E8', overflow: 'hidden' },
+  gameDayHeader:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(74,155,127,0.06)', paddingHorizontal: 14, paddingVertical: 10 },
+  gameDayHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  gameDayDate:       { fontSize: 13, fontWeight: '700', color: Colors.textDark },
+  gameDayMeta:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  gameDayCount:      { fontSize: 12, color: Colors.textLight, fontWeight: '500' },
+  gameDayBestPill:   { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,193,7,0.15)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  gameDayBestText:   { fontSize: 11, fontWeight: '700', color: '#B8860B' },
+
+  gamePlayRow:       { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
+  gamePlayNum:       { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(74,155,127,0.1)', alignItems: 'center', justifyContent: 'center' },
+  gamePlayNumText:   { fontSize: 11, fontWeight: '700', color: Colors.primary },
+  gamePlayName:      { flex: 1, fontSize: 13, fontWeight: '600', color: Colors.textMedium },
+  gameScorePill:     { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F0F0', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
+  gameScorePillBest: { backgroundColor: 'rgba(255,193,7,0.2)' },
+  gameScoreText:     { fontSize: 13, fontWeight: '700', color: Colors.textMedium },
+  gameScoreTextBest: { color: '#B8860B' },
 });

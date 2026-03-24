@@ -114,49 +114,23 @@ export default function Reflection() {
     try {
       setLoading(true);
 
-      // 1. Load category
-      const { data: category, error: catError } = await supabase
-        .from("quiz_categories")
-        .select("id, daily_question_count")
-        .eq("is_active", true)
-        .limit(1)
-        .single();
-      if (catError) throw catError;
-      if (!category) { setQuestions([]); return; }
-
-      const limit = category.daily_question_count ?? 2;
-
-      // 2. Load all active questions
       const { data: allQuestions, error: qError } = await supabase
         .from("quiz_questions")
         .select("*")
-        .eq("category_id", category.id)
         .eq("is_active", true)
         .order("order_index", { ascending: true });
       if (qError) throw qError;
 
-      const todayQuestions = getDailyQuestions(allQuestions || [], limit);
-      setQuestions(todayQuestions);
+      setQuestions(allQuestions || []);
 
-      // 3. ── CORE FIX: Load today's answered question IDs from the DB ──
-      //    We store `session_date` as a plain YYYY-MM-DD string so there are
-      //    zero timezone issues. If the column doesn't exist yet, we fall back
-      //    to a created_at range query.
       const today = getLocalToday();
       let answeredIds = new Set<string>();
-
       const { data: attempts, error: attError } = await supabase
-        .from("quiz_attempts")
-        .select("question_id")
-        .eq("user_id", user.id)
-        .eq("session_date", today);
+        .from("quiz_attempts").select("question_id")
+        .eq("user_id", user.id).eq("session_date", today);
 
       if (attError) {
-        // Fallback: session_date column not yet added — query by created_at
-        console.warn("Falling back to created_at range (add session_date column to quiz_attempts):", attError.message);
-        const { data: fallback } = await supabase
-          .from("quiz_attempts")
-          .select("question_id")
+        const { data: fallback } = await supabase.from("quiz_attempts").select("question_id")
           .eq("user_id", user.id)
           .gte("attempted_at", `${today}T00:00:00`)
           .lte("attempted_at", `${today}T23:59:59`);
@@ -167,21 +141,15 @@ export default function Reflection() {
 
       setAnsweredToday(answeredIds);
 
-      // 4. Jump to first unanswered question
-      const firstUnanswered = todayQuestions.findIndex(q => !answeredIds.has(q.id));
-
+      const firstUnanswered = (allQuestions || []).findIndex(q => !answeredIds.has(q.id));
       if (firstUnanswered === -1) {
-        // All questions answered — land on the last one in completed state
-        setCurrentQuestionIndex(todayQuestions.length - 1);
+        setCurrentQuestionIndex((allQuestions?.length ?? 1) - 1);
         setShowExplanation(true);
       } else {
         setCurrentQuestionIndex(firstUnanswered);
-        setUserAnswer("");
-        setSelectedRating(null);
-        setShowExplanation(false);
+        setUserAnswer(""); setSelectedRating(null); setShowExplanation(false);
       }
     } catch (e: any) {
-      console.error("fetchQuestions error:", e);
       Alert.alert("Error", "Failed to load questions");
     } finally {
       setLoading(false);

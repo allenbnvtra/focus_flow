@@ -20,7 +20,6 @@ export default function DashboardLayout() {
   }
 
   if (!isAuthenticated) return <Redirect href="/auth/login" />;
-  console.log('User Info:', user); // Debugging line to check user inforr
   if (user?.is_admin)   return <AdminDashboard />;
 
   return (

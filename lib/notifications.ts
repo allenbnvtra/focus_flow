@@ -115,8 +115,6 @@ async function scheduleIfFuture(
       date: fireTime,
     },
   });
-
-  console.log(`✅ Scheduled [${identifier}] at ${fireTime.toLocaleTimeString()}`);
 }
 
 // ─── Check if mood already logged today ───────────────────────────────────────
