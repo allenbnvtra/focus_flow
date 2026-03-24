@@ -7,6 +7,7 @@ import * as Notifications from 'expo-notifications';
 import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 import { router } from 'expo-router';
+import Constants from 'expo-constants';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
@@ -20,8 +21,23 @@ import {
 } from '../lib/notifications';
 import { registerTimerNotificationCategory } from '../lib/timerNotification';
 import MoodCheckInModal, { MoodPeriod } from '../components/MoodCheckInModal';
+import ForceUpdateModal from '../components/ForceUpdateModal';  // ← ADD
 
 SplashScreen.preventAutoHideAsync();
+
+// ─── Version helper ───────────────────────────────────────────────────────────
+
+/** Returns true if installedVersion is older than minimumVersion.
+ *  Compares semver-style: "1.0.9" < "1.1.0" → true */
+function isOutdated(installedVersion: string, minimumVersion: string): boolean {
+  const toNums = (v: string) => v.split('.').map(Number);
+  const [iMaj, iMin, iPat] = toNums(installedVersion);
+  const [mMaj, mMin, mPat] = toNums(minimumVersion);
+
+  if (iMaj !== mMaj) return iMaj < mMaj;
+  if (iMin !== mMin) return iMin < mMin;
+  return iPat < mPat;
+}
 
 // ─── Background task (Android only) ──────────────────────────────────────────
 
@@ -50,11 +66,11 @@ TaskManager.defineTask(BACKGROUND_TASK_NAME, async () => {
     const afternoonDone    = await hasMoodForToday('afternoon');
 
     await scheduleAllDailyReminders({
-      userName:        profileRes.data?.name || '',
+      userName:          profileRes.data?.name || '',
       incompleteTasks,
-      hasTasksToday:    allTodayTasks.length > 0,
-      hasActivityToday: (sessionsRes.data || []).length > 0,
-      morningMoodDone:  morningDone,
+      hasTasksToday:     allTodayTasks.length > 0,
+      hasActivityToday:  (sessionsRes.data || []).length > 0,
+      morningMoodDone:   morningDone,
       afternoonMoodDone: afternoonDone,
     });
   } catch (e) {
@@ -107,7 +123,7 @@ function getCurrentPeriod(): MoodPeriod | null {
   const hour = new Date().getHours();
   if (hour >= 6  && hour < 12) return 'morning';
   if (hour >= 12 && hour < 18) return 'afternoon';
-  return null; // outside morning/afternoon window — don't show
+  return null;
 }
 
 // ─── Inner layout ─────────────────────────────────────────────────────────────
@@ -122,9 +138,45 @@ function RootLayoutContent() {
   const [moodModalVisible, setMoodModalVisible] = useState(false);
   const [moodPeriod, setMoodPeriod]             = useState<MoodPeriod>('morning');
 
+  // ── Force update state ────────────────────────────────────────────────────
+  const [updateRequired, setUpdateRequired]   = useState(false);
+  const [latestVersion, setLatestVersion]     = useState('');
+  const currentVersion: string =
+    Constants.expoConfig?.version ??
+    (Constants.manifest as any)?.version ??
+    '0.0.0';
+
   useEffect(() => {
     if (fontsLoaded) SplashScreen.hideAsync();
   }, [fontsLoaded]);
+
+  // ── Check minimum version on mount ───────────────────────────────────────
+  useEffect(() => {
+    const checkVersion = async () => {
+      try {
+        const configKey = Platform.OS === 'ios' ? 'min_ios_version' : 'min_android_version';
+        const { data } = await supabase
+          .from('app_config')
+          .select('value')
+          .eq('key', configKey)
+          .maybeSingle();
+
+        if (!data?.value) return;
+
+        const minVersion = data.value;
+        setLatestVersion(minVersion);
+
+        if (isOutdated(currentVersion, minVersion)) {
+          setUpdateRequired(true);
+        }
+      } catch (e) {
+        // Fail silently — never block the app due to a version check error
+        console.warn('Version check failed:', e);
+      }
+    };
+
+    checkVersion();
+  }, []);
 
   // ── Show mood modal if it's morning/afternoon and not yet logged ──────────
   useEffect(() => {
@@ -137,7 +189,6 @@ function RootLayoutContent() {
       const alreadyLogged = await hasMoodForToday(period);
       if (alreadyLogged) return;
 
-      // Small delay so the app fully renders before showing the modal
       setTimeout(() => {
         setMoodPeriod(period);
         setMoodModalVisible(true);
@@ -156,7 +207,6 @@ function RootLayoutContent() {
       await registerTimerNotificationCategory();
       await scheduleRemindersFromSupabase();
 
-      // Background task: Android only
       if (Platform.OS === 'android') {
         try {
           const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_TASK_NAME);
@@ -171,12 +221,10 @@ function RootLayoutContent() {
       }
     })();
 
-    // Handle notification taps
     responseListener.current = Notifications.addNotificationResponseReceivedListener(
       async (response) => {
         const data = response.notification.request.content.data as any;
 
-        // Mood check-in notification tap → show mood modal
         if (data?.type === 'mood-checkin') {
           const period = data.period as MoodPeriod;
           const alreadyLogged = await hasMoodForToday(period);
@@ -204,7 +252,6 @@ function RootLayoutContent() {
     };
   }, []);
 
-  // ── Save mood to Supabase daily_moods table ───────────────────────────────
   const handleMoodSubmit = async (mood: { emoji: string; label: string; value: number }) => {
     try {
       if (!user?.id) return;
@@ -220,8 +267,6 @@ function RootLayoutContent() {
 
       await markMoodLogged(moodPeriod);
       setMoodModalVisible(false);
-
-      // Reschedule to cancel the now-unneeded notification
       await scheduleRemindersFromSupabase();
     } catch (e) {
       console.error('Failed to save mood:', e);
@@ -242,9 +287,16 @@ function RootLayoutContent() {
         }}
       />
 
-      {/* Mood check-in modal — shown on app open or notification tap */}
+      {/* Force update modal — shown on top of everything, cannot be dismissed */}
+      <ForceUpdateModal
+        visible={updateRequired}
+        currentVersion={currentVersion}
+        latestVersion={latestVersion}
+      />
+
+      {/* Mood check-in modal */}
       <MoodCheckInModal
-        visible={moodModalVisible}
+        visible={moodModalVisible && !updateRequired}
         period={moodPeriod}
         userName={user?.name || ''}
         onSubmit={handleMoodSubmit}
