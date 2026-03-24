@@ -12,8 +12,7 @@ import { useAuth } from '../../../../contexts/AuthContext';
 import { supabase } from '../../../../lib/supabase';
 
 const { width } = Dimensions.get('window');
-const GAME_NAME   = 'memory_game';
-const DAILY_LIMIT = 3;
+const GAME_NAME = 'memory_game';
 
 type GameColor = 'red' | 'blue' | 'green' | 'yellow';
 
@@ -57,7 +56,8 @@ export default function MemoryGame() {
   const [quitScore, setQuitScore]           = useState(0);
   const [savingScore, setSavingScore]       = useState(false);
 
-  // Daily limit
+  // Daily limit (fetched from game_settings table)
+  const [dailyLimit, setDailyLimit]         = useState(3);   // fallback until loaded
   const [playsToday, setPlaysToday]         = useState(0);
   const [loadingPlays, setLoadingPlays]     = useState(true);
 
@@ -103,14 +103,23 @@ export default function MemoryGame() {
     } catch (e) { console.error('loadDbHighScore:', e); }
   };
 
-  /** Count how many games this user has played today. */
+  /** Fetch daily limit from game_settings + count today's plays in one go. */
   const loadDailyPlays = async () => {
     if (!user?.id) return;
     try {
       setLoadingPlays(true);
       const today = getLocalToday();
 
-      // Try session_date column first
+      // 1. Fetch configured daily limit
+      const { data: settings } = await supabase
+        .from('game_settings')
+        .select('daily_limit')
+        .eq('game_name', GAME_NAME)
+        .maybeSingle();
+      const limit = settings?.daily_limit ?? 3;
+      setDailyLimit(limit);
+
+      // 2. Count plays today — try session_date first, fall back to created_at range
       const { data, error } = await supabase
         .from('game_scores')
         .select('id', { count: 'exact' })
@@ -119,7 +128,6 @@ export default function MemoryGame() {
         .eq('session_date', today);
 
       if (error) {
-        // Fallback: use created_at range
         const { count } = await supabase
           .from('game_scores')
           .select('id', { count: 'exact', head: true })
@@ -241,7 +249,7 @@ export default function MemoryGame() {
   };
 
   const startGame = () => {
-    if (playsToday >= DAILY_LIMIT) return;
+    if (isLimitReached) return;
     setGameStarted(true);
     setGameOver(false);
     setShowQuitScore(false);
@@ -330,8 +338,8 @@ export default function MemoryGame() {
   };
 
   const bestScore      = Math.max(highScore, dbHighScore);
-  const playsLeft      = Math.max(0, DAILY_LIMIT - playsToday);
-  const isLimitReached = playsToday >= DAILY_LIMIT;
+  const playsLeft      = Math.max(0, dailyLimit - playsToday);
+  const isLimitReached = playsToday >= dailyLimit;
 
   // ─── Leaderboard modal ────────────────────────────────────────────────────
 
@@ -467,13 +475,13 @@ export default function MemoryGame() {
                 </Text>
               ) : (
                 <Text style={styles.dailyBannerText}>
-                  {playsLeft} of {DAILY_LIMIT} {playsLeft === 1 ? 'play' : 'plays'} remaining today
+                  {playsLeft} of {dailyLimit} {playsLeft === 1 ? 'play' : 'plays'} remaining today
                 </Text>
               )}
               {/* Pip indicators */}
               {!loadingPlays && (
                 <View style={styles.pipRow}>
-                  {Array.from({ length: DAILY_LIMIT }).map((_, i) => (
+                  {Array.from({ length: dailyLimit }).map((_, i) => (
                     <View
                       key={i}
                       style={[
@@ -611,7 +619,7 @@ export default function MemoryGame() {
                   <Text style={styles.limitReachedEmoji}>🔒</Text>
                   <Text style={styles.limitReachedTitle}>Daily Limit Reached</Text>
                   <Text style={styles.limitReachedSub}>
-                    You've used all {DAILY_LIMIT} plays for today.{'\n'}Come back tomorrow for more!
+                    You've used all {dailyLimit} plays for today.{'\n'}Come back tomorrow for more!
                   </Text>
                   <TouchableOpacity style={styles.viewLbBtn} onPress={handleOpenLeaderboard}>
                     <Ionicons name="trophy-outline" size={16} color={Colors.yellow} />
@@ -644,7 +652,7 @@ export default function MemoryGame() {
               <Text style={styles.instructionText}>• The game gets faster as you progress</Text>
               <Text style={styles.instructionText}>• Make a mistake and it's game over!</Text>
               <Text style={[styles.instructionText, { color: Colors.yellow, marginTop: 4 }]}>
-                ⚡ You have {DAILY_LIMIT} plays per day — use them wisely!
+                ⚡ You have {dailyLimit} plays per day — use them wisely!
               </Text>
             </View>
           )}
