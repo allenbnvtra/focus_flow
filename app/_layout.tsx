@@ -21,19 +21,23 @@ import {
 } from '../lib/notifications';
 import { registerTimerNotificationCategory } from '../lib/timerNotification';
 import MoodCheckInModal, { MoodPeriod } from '../components/MoodCheckInModal';
-import ForceUpdateModal from '../components/ForceUpdateModal';  // ← ADD
+import ForceUpdateModal from '../components/ForceUpdateModal';
+import RateUsModal, {
+  incrementAppOpens,
+  shouldShowRateModal,
+  markRatingDone,
+} from '../components/RateUsModal';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import MaintenanceModal from '../components/MaintenanceModal';
 
 SplashScreen.preventAutoHideAsync();
 
 // ─── Version helper ───────────────────────────────────────────────────────────
 
-/** Returns true if installedVersion is older than minimumVersion.
- *  Compares semver-style: "1.0.9" < "1.1.0" → true */
 function isOutdated(installedVersion: string, minimumVersion: string): boolean {
   const toNums = (v: string) => v.split('.').map(Number);
   const [iMaj, iMin, iPat] = toNums(installedVersion);
   const [mMaj, mMin, mPat] = toNums(minimumVersion);
-
   if (iMaj !== mMaj) return iMaj < mMaj;
   if (iMin !== mMin) return iMin < mMin;
   return iPat < mPat;
@@ -60,10 +64,10 @@ TaskManager.defineTask(BACKGROUND_TASK_NAME, async () => {
         .gte('completed_at', `${today}T00:00:00`),
     ]);
 
-    const allTodayTasks    = tasksRes.data    || [];
-    const incompleteTasks  = allTodayTasks.filter((t: any) => !t.completed).map((t: any) => t.text);
-    const morningDone      = await hasMoodForToday('morning');
-    const afternoonDone    = await hasMoodForToday('afternoon');
+    const allTodayTasks   = tasksRes.data    || [];
+    const incompleteTasks = allTodayTasks.filter((t: any) => !t.completed).map((t: any) => t.text);
+    const morningDone     = await hasMoodForToday('morning');
+    const afternoonDone   = await hasMoodForToday('afternoon');
 
     await scheduleAllDailyReminders({
       userName:          profileRes.data?.name || '',
@@ -99,10 +103,10 @@ async function scheduleRemindersFromSupabase() {
         .gte('completed_at', `${today}T00:00:00`),
     ]);
 
-    const allTodayTasks    = tasksRes.data    || [];
-    const incompleteTasks  = allTodayTasks.filter((t: any) => !t.completed).map((t: any) => t.text);
-    const morningDone      = await hasMoodForToday('morning');
-    const afternoonDone    = await hasMoodForToday('afternoon');
+    const allTodayTasks   = tasksRes.data    || [];
+    const incompleteTasks = allTodayTasks.filter((t: any) => !t.completed).map((t: any) => t.text);
+    const morningDone     = await hasMoodForToday('morning');
+    const afternoonDone   = await hasMoodForToday('afternoon');
 
     await scheduleAllDailyReminders({
       userName:          profileRes.data?.name || '',
@@ -138,13 +142,21 @@ function RootLayoutContent() {
   const [moodModalVisible, setMoodModalVisible] = useState(false);
   const [moodPeriod, setMoodPeriod]             = useState<MoodPeriod>('morning');
 
-  // ── Force update state ────────────────────────────────────────────────────
-  const [updateRequired, setUpdateRequired]   = useState(false);
-  const [latestVersion, setLatestVersion]     = useState('');
+  // Force update state
+  const [updateRequired, setUpdateRequired] = useState(false);
+  const [latestVersion, setLatestVersion]   = useState('');
   const currentVersion: string =
     Constants.expoConfig?.version ??
     (Constants.manifest as any)?.version ??
     '0.0.0';
+
+  // ── Rate us state ─────────────────────────────────────────────────────────
+  const [rateModalVisible, setRateModalVisible] = useState(false);
+
+  // ── Maintenance state ──
+  const [isMaintenance, setIsMaintenance]           = useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState('');
+  const [maintenanceEta, setMaintenanceEta]         = useState('');
 
   useEffect(() => {
     if (fontsLoaded) SplashScreen.hideAsync();
@@ -157,26 +169,63 @@ function RootLayoutContent() {
         const configKey = Platform.OS === 'ios' ? 'min_ios_version' : 'min_android_version';
         const { data } = await supabase
           .from('app_config')
-          .select('value')
-          .eq('key', configKey)
-          .maybeSingle();
+          .select('key, value')
+          .in('key', [
+            configKey,
+            'is_maintenance',
+            'maintenance_message',
+            'maintenance_estimated_time',
+          ]);
 
-        if (!data?.value) return;
+        if (!data) return;
 
-        const minVersion = data.value;
+        const get = (key: string) => data.find(r => r.key === key)?.value ?? '';
+
+        // Maintenance check
+        if (get('is_maintenance') === 'true') {
+          setIsMaintenance(true);
+          setMaintenanceMessage(get('maintenance_message'));
+          setMaintenanceEta(get('maintenance_estimated_time'));
+        }
+
+        // Force update check
+        const minVersion = get(configKey);
+        if (!minVersion) return;
         setLatestVersion(minVersion);
-
         if (isOutdated(currentVersion, minVersion)) {
           setUpdateRequired(true);
         }
       } catch (e) {
-        // Fail silently — never block the app due to a version check error
-        console.warn('Version check failed:', e);
+        console.warn('Config check failed:', e);
       }
     };
 
     checkVersion();
   }, []);
+
+  // ── Increment open count & decide whether to show rate modal ─────────────
+  // Only runs once the user is authenticated so anonymous opens don't count.
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+
+    const checkRatePrompt = async () => {
+      const { data } = await supabase
+        .from('users')
+        .select('has_rated')
+        .eq('id', user.id)
+        .single();
+
+      if (data?.has_rated) return;
+
+      const opens = await incrementAppOpens();
+      const show = await shouldShowRateModal();
+      if (!show) return;
+
+      setTimeout(() => setRateModalVisible(true), 2500);
+    };
+
+    checkRatePrompt();
+  }, [isAuthenticated, user]);
 
   // ── Show mood modal if it's morning/afternoon and not yet logged ──────────
   useEffect(() => {
@@ -276,6 +325,9 @@ function RootLayoutContent() {
 
   if (!fontsLoaded) return null;
 
+  // Convenience: is any blocking modal open?
+  const anyModalOpen = updateRequired || isMaintenance || rateModalVisible;
+
   return (
     <>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
@@ -287,16 +339,29 @@ function RootLayoutContent() {
         }}
       />
 
-      {/* Force update modal — shown on top of everything, cannot be dismissed */}
+      {/* Force update — cannot be dismissed */}
       <ForceUpdateModal
         visible={updateRequired}
         currentVersion={currentVersion}
         latestVersion={latestVersion}
       />
 
-      {/* Mood check-in modal */}
+      <MaintenanceModal
+        visible={isMaintenance && !updateRequired}
+        message={maintenanceMessage}
+        estimatedTime={maintenanceEta}
+      />
+
+      {/* Rate us — only when no force-update is pending */}
+      <RateUsModal
+        visible={rateModalVisible && !updateRequired}
+        onDismiss={() => setRateModalVisible(false)}
+        userId={user?.id} 
+      />
+
+      {/* Mood check-in — only when no other modal is blocking */}
       <MoodCheckInModal
-        visible={moodModalVisible && !updateRequired}
+        visible={moodModalVisible && !anyModalOpen}
         period={moodPeriod}
         userName={user?.name || ''}
         onSubmit={handleMoodSubmit}
@@ -310,10 +375,12 @@ function RootLayoutContent() {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <RootLayoutContent />
-      </AuthProvider>
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider>
+        <AuthProvider>
+          <RootLayoutContent />
+        </AuthProvider>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

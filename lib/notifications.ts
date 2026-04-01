@@ -11,6 +11,9 @@ const MOOD_CHANNEL         = 'mood-checkin';
 const TIMER_CHANNEL        = 'active-timer';
 const NOTIF_PERM_KEY       = 'focusflow_notif_permissions';
 
+// Fixed ID — every update cancels+reposts this exact slot
+const LIVE_TIMER_NOTIF_ID  = 'focusflow-live-timer';
+
 // Storage keys to track if mood was already logged today
 export const MOOD_MORNING_KEY   = 'focusflow_mood_morning';
 export const MOOD_AFTERNOON_KEY = 'focusflow_mood_afternoon';
@@ -18,13 +21,16 @@ export const MOOD_AFTERNOON_KEY = 'focusflow_mood_afternoon';
 // ─── Notification handler ─────────────────────────────────────────────────────
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: false,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  handleNotification: async (notification) => {
+    const isLiveTimer = notification.request.identifier === LIVE_TIMER_NOTIF_ID;
+    return {
+      shouldShowAlert: !isLiveTimer,   // no banner pop for timer ticks
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+      shouldShowBanner: !isLiveTimer,
+      shouldShowList: true,            // always visible in notification center
+    };
+  },
 });
 
 // ─── Request permissions ──────────────────────────────────────────────────────
@@ -72,12 +78,127 @@ export async function setupNotificationChannels() {
     lightColor: '#7C4DFF',
   });
 
+  // LOW importance = silent, no heads-up, no vibration — perfect for a
+  // persistent timer status bar notification
   await Notifications.setNotificationChannelAsync(TIMER_CHANNEL, {
     name: 'Active Timer',
     importance: Notifications.AndroidImportance.LOW,
     vibrationPattern: [0],
     lightColor: '#4A9B7F',
+    enableVibrate: false,
+    showBadge: false,
   });
+}
+
+// ─── Register notification action categories ──────────────────────────────────
+
+export async function registerTimerNotificationCategory(): Promise<void> {
+  try {
+    await Notifications.setNotificationCategoryAsync('focusflow-timer-running', [
+      {
+        identifier: 'pause',
+        buttonTitle: '⏸ Pause',
+        options: { opensAppToForeground: false },
+      },
+      {
+        identifier: 'stop',
+        buttonTitle: '⏹ Stop',
+        options: { opensAppToForeground: true },
+      },
+    ]);
+
+    await Notifications.setNotificationCategoryAsync('focusflow-timer-paused', [
+      {
+        identifier: 'resume',
+        buttonTitle: '▶ Resume',
+        options: { opensAppToForeground: false },
+      },
+      {
+        identifier: 'stop',
+        buttonTitle: '⏹ Stop',
+        options: { opensAppToForeground: true },
+      },
+    ]);
+  } catch (e) {
+    console.error('Failed to register timer notification categories:', e);
+  }
+}
+
+// ─── Live Timer Notification ──────────────────────────────────────────────────
+
+const pad = (n: number) => n.toString().padStart(2, '0');
+
+function formatElapsedForNotif(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return h > 0
+    ? `${pad(h)}:${pad(m)}:${pad(s)}`
+    : `${pad(m)}:${pad(s)}`;
+}
+
+/**
+ * Posts or replaces the live timer notification.
+ *
+ * Strategy: dismiss → cancel → re-post with the same identifier.
+ * This is the correct expo-notifications pattern for "updating" a notification.
+ * The OS deduplicates on identifier so only one notification ever exists.
+ *
+ * Throttle calls to every 5s from the component — the OS will handle it fine.
+ */
+export async function updateTimerNotification(
+  taskName: string,
+  elapsedSeconds: number,
+  isPaused: boolean,
+): Promise<void> {
+  try {
+    const timeStr     = formatElapsedForNotif(elapsedSeconds);
+    const statusIcon  = isPaused ? '⏸' : '⏱';
+    const statusLabel = isPaused ? 'Paused' : 'Focusing';
+    const category    = isPaused ? 'focusflow-timer-paused' : 'focusflow-timer-running';
+
+    // Dismiss the delivered notification (removes it from tray momentarily)
+    // then cancel any scheduled duplicate, then re-post immediately.
+    // This is the only reliable replace pattern in expo-notifications.
+    try { await Notifications.dismissNotificationAsync(LIVE_TIMER_NOTIF_ID); } catch (_) {}
+    try { await Notifications.cancelScheduledNotificationAsync(LIVE_TIMER_NOTIF_ID); } catch (_) {}
+
+    const content: Notifications.NotificationContentInput = {
+      title: `${statusIcon} ${timeStr} — ${statusLabel}`,
+      body: taskName,
+      categoryIdentifier: category,
+      data: { type: 'live-timer', elapsedSeconds, isPaused, taskName },
+    };
+
+    // Android: attach channel
+    if (Platform.OS === 'android') {
+      (content as any).channelId = TIMER_CHANNEL;
+      (content as any).priority  = Notifications.AndroidNotificationPriority.LOW;
+      (content as any).color     = '#4A9B7F';
+    }
+
+    // iOS: passive = goes silently to notification center, no banner/sound
+    if (Platform.OS === 'ios') {
+      (content as any).interruptionLevel = 'passive';
+    }
+
+    await Notifications.scheduleNotificationAsync({
+      identifier: LIVE_TIMER_NOTIF_ID,
+      content,
+      trigger: null,
+    });
+  } catch (e) {
+    console.error('Failed to update timer notification:', e);
+  }
+}
+
+/**
+ * Fully removes the timer notification.
+ * Call on session stop, complete, or discard.
+ */
+export async function clearTimerNotification(): Promise<void> {
+  try { await Notifications.dismissNotificationAsync(LIVE_TIMER_NOTIF_ID); } catch (_) {}
+  try { await Notifications.cancelScheduledNotificationAsync(LIVE_TIMER_NOTIF_ID); } catch (_) {}
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -138,9 +259,7 @@ export async function markMoodLogged(period: 'morning' | 'afternoon') {
   await AsyncStorage.setItem(key, JSON.stringify({ date: today }));
 }
 
-// ─── Schedule mood check-in notifications ────────────────────────────────────
-//  9:00 AM  — Morning mood check-in
-//  2:00 PM  — Afternoon mood check-in
+// ─── Schedule mood check-in notifications ─────────────────────────────────────
 
 export async function scheduleMoodCheckInNotifications(
   userName: string,
@@ -152,7 +271,6 @@ export async function scheduleMoodCheckInNotifications(
 
   const name = userName || 'there';
 
-  // 9:00 AM morning mood
   if (!morningDone) {
     await scheduleIfFuture(
       `mood-morning-${Date.now()}`,
@@ -166,7 +284,6 @@ export async function scheduleMoodCheckInNotifications(
     );
   }
 
-  // 2:00 PM afternoon mood
   if (!afternoonDone) {
     await scheduleIfFuture(
       `mood-afternoon-${Date.now()}`,
@@ -181,7 +298,7 @@ export async function scheduleMoodCheckInNotifications(
   }
 }
 
-// ─── Schedule all daily reminders ────────────────────────────────────────────
+// ─── Schedule all daily reminders ─────────────────────────────────────────────
 
 export async function scheduleAllDailyReminders({
   userName,
@@ -209,7 +326,6 @@ export async function scheduleAllDailyReminders({
   const preview      = incompleteTasks.slice(0, 2).join(', ');
   const extraCount   = incompleteTasks.length > 2 ? ` +${incompleteTasks.length - 2} more` : '';
 
-  // ── 7:00 AM ───────────────────────────────────────────────────────────────
   await scheduleIfFuture(
     `daily-7am-${Date.now()}`,
     {
@@ -223,7 +339,6 @@ export async function scheduleAllDailyReminders({
     7, 0,
   );
 
-  // ── 12:00 PM ──────────────────────────────────────────────────────────────
   await scheduleIfFuture(
     `daily-12pm-${Date.now()}`,
     {
@@ -239,7 +354,6 @@ export async function scheduleAllDailyReminders({
     12, 0,
   );
 
-  // ── 5:00 PM ───────────────────────────────────────────────────────────────
   await scheduleIfFuture(
     `daily-5pm-${Date.now()}`,
     {
@@ -255,7 +369,6 @@ export async function scheduleAllDailyReminders({
     17, 0,
   );
 
-  // ── 8:00 PM ───────────────────────────────────────────────────────────────
   await scheduleIfFuture(
     `daily-8pm-${Date.now()}`,
     {
@@ -271,7 +384,6 @@ export async function scheduleAllDailyReminders({
     20, 0,
   );
 
-  // ── Streak reminder (9 PM, only if no focus activity) ────────────────────
   if (!hasActivityToday) {
     await scheduleIfFuture(
       `streak-reminder-${Date.now()}`,
@@ -285,7 +397,6 @@ export async function scheduleAllDailyReminders({
     );
   }
 
-  // ── Mood check-in notifications ───────────────────────────────────────────
   await scheduleMoodCheckInNotifications(name, morningMoodDone, afternoonMoodDone);
 }
 

@@ -1,30 +1,29 @@
 import React, { useRef, useEffect } from 'react';
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity,
-  Linking, Platform, Animated, Easing,
+  Modal, View, Text, StyleSheet,
+  Animated, Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-const APP_STORE_URL  = 'https://apps.apple.com/app/id6758321014';
-const PLAY_STORE_URL = 'https://apps.apple.com/app/id6758321014';
-
-interface ForceUpdateModalProps {
+interface MaintenanceModalProps {
   visible: boolean;
-  currentVersion: string;
-  latestVersion: string;
+  message?: string;
+  estimatedTime?: string;
 }
 
-const WHATS_NEW = [
-  'Bug fixes and stability improvements',
-  'Faster performance and load times',
-  'New features and enhancements',
+const DEFAULT_MESSAGE = "We're making FocusFlow better for you. Please check back shortly.";
+
+const WHAT_WE_DO = [
+  'Improving app performance and stability',
+  'Applying important security updates',
+  'Rolling out new features and fixes',
 ];
 
-export default function ForceUpdateModal({
+export default function MaintenanceModal({
   visible,
-  currentVersion,
-  latestVersion,
-}: ForceUpdateModalProps) {
+  message,
+  estimatedTime,
+}: MaintenanceModalProps) {
   const slideAnim   = useRef(new Animated.Value(40)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -44,19 +43,11 @@ export default function ForceUpdateModal({
           useNativeDriver: true,
         }),
       ]).start();
+    } else {
+      slideAnim.setValue(40);
+      opacityAnim.setValue(0);
     }
   }, [visible]);
-
-  const handleUpdate = () => {
-    const url = Platform.OS === 'ios' ? APP_STORE_URL : PLAY_STORE_URL;
-    Linking.openURL(url).catch(() => {
-      Linking.openURL(
-        Platform.OS === 'ios'
-          ? 'https://apps.apple.com'
-          : 'https://play.google.com/store'
-      );
-    });
-  };
 
   return (
     <Modal
@@ -78,36 +69,33 @@ export default function ForceUpdateModal({
           {/* ── Icon + titles ── */}
           <View style={s.header}>
             <View style={s.iconWrap}>
-              <Ionicons name="timer-outline" size={38} color="#fff" />
-              {/* Update badge */}
+              <Ionicons name="construct-outline" size={38} color="#fff" />
+              {/* Pulse badge */}
               <View style={s.badge}>
-                <Ionicons name="arrow-up" size={10} color="#fff" />
+                <Ionicons name="time-outline" size={11} color="#fff" />
               </View>
             </View>
 
             <Text style={s.appName}>FocusFlow</Text>
-            <Text style={s.title}>Update available</Text>
-            <Text style={s.subtitle}>Version {latestVersion} is ready to install</Text>
+            <Text style={s.title}>Under Maintenance</Text>
+            <Text style={s.subtitle}>{message || DEFAULT_MESSAGE}</Text>
 
-            {/* Version pills */}
-            <View style={s.versionRow}>
-              <View style={s.pillCurrent}>
-                <Text style={s.pillCurrentText}>{currentVersion} current</Text>
+            {/* Estimated time pill — only shown if provided */}
+            {estimatedTime ? (
+              <View style={s.etaRow}>
+                <Ionicons name="hourglass-outline" size={13} color={GREEN_DRK} />
+                <Text style={s.etaText}>Back in ~{estimatedTime}</Text>
               </View>
-              <Ionicons name="arrow-forward" size={13} color="#888" />
-              <View style={s.pillNew}>
-                <Text style={s.pillNewText}>{latestVersion} new</Text>
-              </View>
-            </View>
+            ) : null}
           </View>
 
           {/* ── Divider ── */}
           <View style={s.divider} />
 
-          {/* ── What's new ── */}
+          {/* ── What we're doing ── */}
           <View style={s.body}>
-            <Text style={s.sectionLabel}>What's new</Text>
-            {WHATS_NEW.map((item, i) => (
+            <Text style={s.sectionLabel}>What we're doing</Text>
+            {WHAT_WE_DO.map((item, i) => (
               <View key={i} style={s.bulletRow}>
                 <View style={s.dot} />
                 <Text style={s.bulletText}>{item}</Text>
@@ -115,18 +103,15 @@ export default function ForceUpdateModal({
             ))}
           </View>
 
-          {/* ── CTA ── */}
+          {/* ── Footer ── */}
           <View style={s.footer}>
-            <TouchableOpacity
-              onPress={handleUpdate}
-              activeOpacity={0.82}
-              style={s.btn}
-            >
-              <Text style={s.btnText}>Update now</Text>
-            </TouchableOpacity>
-            <Text style={s.footnote}>
-              You must update to continue using the app
-            </Text>
+            <View style={s.infoBox}>
+              <Ionicons name="information-circle-outline" size={16} color={GREEN} />
+              <Text style={s.infoText}>
+                The app will resume automatically once maintenance is complete.
+              </Text>
+            </View>
+            <Text style={s.footnote}>We apologize for the inconvenience 🙏</Text>
           </View>
         </Animated.View>
       </View>
@@ -152,12 +137,10 @@ const s = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: '#fff',
     overflow: 'hidden',
-    // iOS shadow
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
     shadowRadius: 24,
-    // Android shadow
     elevation: 12,
   },
 
@@ -184,7 +167,7 @@ const s = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: GREEN,
+    backgroundColor: '#FF9800',
     borderWidth: 2.5,
     borderColor: '#fff',
     alignItems: 'center',
@@ -209,32 +192,21 @@ const s = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     textAlign: 'center',
+    lineHeight: 20,
     marginBottom: 16,
   },
-  versionRow: {
+  etaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-  },
-  pillCurrent: {
-    backgroundColor: '#F2F2F2',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-  },
-  pillCurrentText: {
-    fontSize: 12,
-    color: '#555',
-  },
-  pillNew: {
+    gap: 6,
     backgroundColor: GREEN_BG,
     borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     borderWidth: 0.5,
     borderColor: '#9FE1CB',
   },
-  pillNewText: {
+  etaText: {
     fontSize: 12,
     color: GREEN_DRK,
     fontWeight: '600',
@@ -288,19 +260,20 @@ const s = StyleSheet.create({
     gap: 12,
     alignItems: 'center',
   },
-  btn: {
-    width: '100%',
-    paddingVertical: 14,
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: GREEN_BG,
     borderRadius: 14,
-    backgroundColor: GREEN,
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: 14,
+    width: '100%',
   },
-  btnText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: 0.1,
+  infoText: {
+    flex: 1,
+    fontSize: 13,
+    color: GREEN_DRK,
+    lineHeight: 19,
   },
   footnote: {
     fontSize: 12,

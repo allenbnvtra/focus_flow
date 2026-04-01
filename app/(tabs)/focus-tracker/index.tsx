@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Platform, TextInput, Modal, KeyboardAvoidingView,
@@ -6,15 +6,33 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import { Swipeable } from "react-native-gesture-handler";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Background from "../../../components/Background";
 import { useAuth } from "../../../contexts/AuthContext";
 import { supabase } from "../../../lib/supabase";
 import { useTheme } from "../../../contexts/ThemeContext";
-import { scheduleUndoneTaskReminder, scheduleStreakReminder } from "../../../lib/notifications";
+import {
+  scheduleUndoneTaskReminder,
+  scheduleStreakReminder,
+  updateTimerNotification,
+  clearTimerNotification,
+  registerTimerNotificationCategory,
+  setupNotificationChannels,
+  requestNotificationPermissions,
+} from "../../../lib/notifications";
+import {
+  startLiveActivity,
+  updateLiveActivity,
+  stopLiveActivity,
+} from "../../../lib/liveActivity";
 
 const TIMER_STORAGE_KEY = "focusflow_active_timer";
 const GOAL_STORAGE_KEY  = "focusflow_daily_goal";
+
+// Notification updates every 10s — Live Activity updates every 15s
+const NOTIF_UPDATE_INTERVAL_MS        = 10_000;
+const LIVE_ACTIVITY_UPDATE_INTERVAL_MS = 15_000;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -67,23 +85,25 @@ export default function FocusTracker() {
   const { user } = useAuth();
   const appState = useRef(AppState.currentState);
 
+  const swipeableRefs = useRef<Map<string, Swipeable | null>>(new Map()).current;
+
   const [tasks, setTasks]                 = useState<Task[]>([]);
   const [todaySessions, setTodaySessions] = useState<SessionDisplay[]>([]);
   const [loading, setLoading]             = useState(true);
 
-  // Per-task count-up timer
+  // Timer state
   const [activeTaskId, setActiveTaskId]         = useState<string | null>(null);
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
   const [elapsedSeconds, setElapsedSeconds]     = useState(0);
   const [isPaused, setIsPaused]                 = useState(false);
   const [elapsedAtPause, setElapsedAtPause]     = useState(0);
 
-  // Pause reason
+  // Pause
   const [pauseReason, setPauseReason]       = useState<string | null>(null);
   const [showPauseModal, setShowPauseModal] = useState(false);
   const [savingPause, setSavingPause]       = useState(false);
 
-  // Post-completion emotion
+  // Emotion
   const [showEmotionModal, setShowEmotionModal]               = useState(false);
   const [selectedEmotion, setSelectedEmotion]                 = useState<string | null>(null);
   const [pendingCompletionTaskId, setPendingCompletionTaskId] = useState<string | null>(null);
@@ -100,16 +120,34 @@ export default function FocusTracker() {
   const [showEditModal, setShowEditModal]                 = useState(false);
   const [editTaskText, setEditTaskText]                   = useState("");
 
-  // Daily goal countdown
+  // Daily goal
   const [dailyGoalSeconds, setDailyGoalSeconds] = useState<number>(0);
   const [showGoalModal, setShowGoalModal]       = useState(false);
   const [goalHours, setGoalHours]               = useState("2");
   const [goalMinutes, setGoalMinutes]           = useState("0");
   const goalAlertedRef = useRef(false);
 
+  // ── Refs for notification + Live Activity ─────────────────────────────────
+  const activeTaskNameRef          = useRef<string>('Focus session');
+  const lastNotifUpdateRef         = useRef<number>(0);
+  const lastLiveActivityUpdateRef  = useRef<number>(0);
+  const elapsedSecondsRef          = useRef<number>(0);
+  const isPausedRef                = useRef<boolean>(false);
+  const activeTaskIdRef            = useRef<string | null>(null);
+
+  // Keep refs in sync
+  useEffect(() => { elapsedSecondsRef.current = elapsedSeconds; }, [elapsedSeconds]);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { activeTaskIdRef.current = activeTaskId; }, [activeTaskId]);
+
   // ─── Effects ─────────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    (async () => {
+      await requestNotificationPermissions();
+      await setupNotificationChannels();
+      await registerTimerNotificationCategory();
+    })();
     if (user) {
       fetchTasks();
       fetchTodaySessions();
@@ -121,6 +159,7 @@ export default function FocusTracker() {
   useEffect(() => { saveTimerState(); },
     [activeTaskId, isPaused, pauseReason, elapsedAtPause, sessionStartTime]);
 
+  // App foreground restore
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
       if (appState.current.match(/inactive|background/) && next === "active") {
@@ -131,6 +170,7 @@ export default function FocusTracker() {
     return () => sub.remove();
   }, []);
 
+  // ── Main 1-second tick ────────────────────────────────────────────────────
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (activeTaskId && !isPaused && sessionStartTime) {
@@ -143,7 +183,46 @@ export default function FocusTracker() {
     return () => clearInterval(interval);
   }, [activeTaskId, isPaused, sessionStartTime, elapsedAtPause]);
 
-  // Fire one-time alert when daily goal is reached
+  // ── Notification + Live Activity update interval ──────────────────────────
+  // Runs once on mount, reads from refs — never stale, never re-registers.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!activeTaskIdRef.current) return;
+      const name    = activeTaskNameRef.current;
+      const elapsed = elapsedSecondsRef.current;
+      const paused  = isPausedRef.current;
+      const now     = Date.now();
+
+      // Notification — every 10s
+      if (now - lastNotifUpdateRef.current >= NOTIF_UPDATE_INTERVAL_MS) {
+        lastNotifUpdateRef.current = now;
+        updateTimerNotification(name, elapsed, paused);
+      }
+
+      // Live Activity — every 15s
+      if (now - lastLiveActivityUpdateRef.current >= LIVE_ACTIVITY_UPDATE_INTERVAL_MS) {
+        lastLiveActivityUpdateRef.current = now;
+        updateLiveActivity(name, elapsed, paused);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []); // intentionally empty — uses refs only
+
+  // ── Sync task name ref ────────────────────────────────────────────────────
+  useEffect(() => {
+    const task = tasks.find(t => t.id === activeTaskId);
+    activeTaskNameRef.current = task?.text ?? 'Focus session';
+  }, [tasks, activeTaskId]);
+
+  // ── Immediate update on pause/resume flip ─────────────────────────────────
+  const pushUpdatesNow = useCallback((name: string, elapsed: number, paused: boolean) => {
+    lastNotifUpdateRef.current        = Date.now();
+    lastLiveActivityUpdateRef.current = Date.now();
+    updateTimerNotification(name, elapsed, paused);
+    updateLiveActivity(name, elapsed, paused);
+  }, []);
+
   useEffect(() => {
     if (!dailyGoalSeconds) return;
     const totalSpent = totalSessionSecs + (activeTaskId ? elapsedSeconds : 0);
@@ -154,7 +233,7 @@ export default function FocusTracker() {
     }
   }, [elapsedSeconds, todaySessions, dailyGoalSeconds]);
 
-  // ── Poll for pause/resume actions from notification buttons ───────────────
+  // Notification action buttons (pause / resume / stop)
   useEffect(() => {
     const interval = setInterval(async () => {
       const action = await AsyncStorage.getItem("focusflow_notif_action");
@@ -162,23 +241,22 @@ export default function FocusTracker() {
       await AsyncStorage.removeItem("focusflow_notif_action");
       if (action === "pause"  && activeTaskId && !isPaused) handlePause();
       if (action === "resume" && activeTaskId && isPaused)  handleResume();
+      if (action === "stop"   && activeTaskId)              handleStopTask();
     }, 1000);
     return () => clearInterval(interval);
   }, [activeTaskId, isPaused]);
 
-  // ── Schedule undone task reminders when tasks change ──────────────────────
   useEffect(() => {
     if (!tasks.length) return;
     const incomplete = tasks.filter(t => !t.completed).map(t => t.text);
     scheduleUndoneTaskReminder(incomplete);
   }, [tasks]);
 
-  // ── Schedule streak reminder when sessions change ─────────────────────────
   useEffect(() => {
     scheduleStreakReminder(todaySessions.length > 0);
   }, [todaySessions]);
 
-  // ─── Daily goal persistence ───────────────────────────────────────────────
+  // ─── Daily goal ───────────────────────────────────────────────────────────
 
   const todayDateStr = () => new Date().toISOString().split("T")[0];
 
@@ -334,12 +412,20 @@ export default function FocusTracker() {
   // ─── Timer helpers ────────────────────────────────────────────────────────
 
   const startNewTask = (taskId: string) => {
+    const taskName = tasks.find(t => t.id === taskId)?.text ?? 'Focus session';
     setActiveTaskId(taskId);
     setSessionStartTime(new Date());
     setElapsedSeconds(0);
     setElapsedAtPause(0);
     setIsPaused(false);
     setPauseReason(null);
+    activeTaskNameRef.current        = taskName;
+    lastNotifUpdateRef.current        = 0;
+    lastLiveActivityUpdateRef.current = 0;
+
+    // Start notification + Live Activity immediately
+    updateTimerNotification(taskName, 0, false);
+    startLiveActivity(taskName, 0);
   };
 
   const resetTimer = () => {
@@ -349,6 +435,14 @@ export default function FocusTracker() {
     setElapsedAtPause(0);
     setIsPaused(false);
     setPauseReason(null);
+    activeTaskNameRef.current        = 'Focus session';
+    lastNotifUpdateRef.current        = 0;
+    lastLiveActivityUpdateRef.current = 0;
+
+    // Clear notification + Live Activity
+    clearTimerNotification();
+    stopLiveActivity();
+
     AsyncStorage.removeItem(TIMER_STORAGE_KEY).catch(() => {});
     if (user?.id) {
       supabase.from("active_timer_state").delete().eq("user_id", user.id).then(() => {});
@@ -374,6 +468,8 @@ export default function FocusTracker() {
     setIsPaused(true);
     setPauseReason(null);
     setShowPauseModal(true);
+    // Immediately update both notification and Live Activity to paused state
+    pushUpdatesNow(activeTaskNameRef.current, elapsedSeconds, true);
   };
 
   const confirmPause = async (reason: string) => {
@@ -392,6 +488,8 @@ export default function FocusTracker() {
     setSessionStartTime(new Date());
     setIsPaused(false);
     setPauseReason(null);
+    // Immediately update both notification and Live Activity to running state
+    pushUpdatesNow(activeTaskNameRef.current, elapsedSeconds, false);
   };
 
   // ─── Completion ───────────────────────────────────────────────────────────
@@ -427,7 +525,7 @@ export default function FocusTracker() {
       if (tErr) throw tErr;
       setTasks(prev => prev.map(t => t.id === taskId
         ? { ...t, completed: true, focus_time: newFocusTime, completion_count: newCount } : t));
-      resetTimer();
+      resetTimer(); // also stops Live Activity + clears notification
       setPendingCompletionTaskId(null);
       setPendingElapsedSeconds(0);
       setShowEmotionModal(false);
@@ -499,6 +597,11 @@ export default function FocusTracker() {
         .update({ text: editTaskText.trim() }).eq("id", editingTask.id).select().single();
       if (error) throw error;
       setTasks(tasks.map(t => t.id === editingTask.id ? data : t));
+      // If editing the active task, update Live Activity + notification name immediately
+      if (activeTaskId === editingTask.id) {
+        activeTaskNameRef.current = editTaskText.trim();
+        pushUpdatesNow(editTaskText.trim(), elapsedSeconds, isPaused);
+      }
       setShowEditModal(false); setEditTaskText(""); setEditingTask(null);
     } catch { Alert.alert("Error", "Failed to update task"); }
     finally { setAddingTask(false); }
@@ -565,6 +668,41 @@ export default function FocusTracker() {
     : 0;
   const goalReached = dailyGoalSeconds > 0 && countdownSeconds === 0;
 
+  // ─── Swipeables ──────────────────────────────────────────────────────────
+
+  const closeAllSwipeables = (exceptId?: string) => {
+    swipeableRefs.forEach((ref, id) => {
+      if (id !== exceptId) ref?.close();
+    });
+  };
+
+  const renderRightActions = (task: Task) => (
+    <View style={styles.swipeActions}>
+      <TouchableOpacity
+        style={[styles.swipeAction, styles.swipeEdit]}
+        onPress={() => {
+          swipeableRefs.get(task.id)?.close();
+          setEditingTask(task);
+          setEditTaskText(task.text);
+          setShowEditModal(true);
+        }}
+      >
+        <Ionicons name="create-outline" size={18} color="#fff" />
+        <Text style={styles.swipeActionText}>Edit</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.swipeAction, styles.swipeDelete]}
+        onPress={() => {
+          swipeableRefs.get(task.id)?.close();
+          handleDeleteTask(task.id);
+        }}
+      >
+        <Ionicons name="trash-outline" size={18} color="#fff" />
+        <Text style={styles.swipeActionText}>Delete</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   // ─── Styles ──────────────────────────────────────────────────────────────
 
   const styles = StyleSheet.create({
@@ -576,15 +714,11 @@ export default function FocusTracker() {
     logoText: { fontSize: 24, fontWeight: "700", color: colors.primary, letterSpacing: -0.5 },
     scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
     pageTitle: { fontSize: 28, fontWeight: "800", color: colors.textDark, marginVertical: 15 },
-
-    // Stats bar
     statsBar: { flexDirection: "row", backgroundColor: colors.cardBg, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border, padding: 16, marginBottom: 16, gap: 4 },
     statItem: { flex: 1, alignItems: "center" },
     statDivider: { width: 1, backgroundColor: colors.border, marginVertical: 4 },
     statValue: { fontSize: 22, fontWeight: "800", color: colors.primary },
     statLabel: { fontSize: 11, fontWeight: "600", color: colors.textLight, marginTop: 2 },
-
-    // Goal card
     goalCard: { backgroundColor: colors.cardBg, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border, padding: 16, marginBottom: 16 },
     goalCardReached: { borderColor: "#4CAF50" },
     goalCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
@@ -605,8 +739,6 @@ export default function FocusTracker() {
     goalSetBtn: { borderRadius: 12, overflow: "hidden" },
     goalSetBtnGradient: { paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 6 },
     goalSetBtnText: { fontSize: 13, fontWeight: "700", color: "white" },
-
-    // Goal modal
     goalModalContent: { backgroundColor: colors.surface, borderRadius: 28, padding: 24, width: "100%", maxWidth: 380, borderWidth: 2, borderColor: colors.border },
     goalModalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
     goalModalTitle: { fontSize: 20, fontWeight: "800", color: colors.textDark },
@@ -625,20 +757,14 @@ export default function FocusTracker() {
     goalConfirmBtn: { flex: 2, borderRadius: 14, overflow: "hidden" },
     goalConfirmGradient: { paddingVertical: 14, alignItems: "center" },
     goalConfirmText: { fontSize: 15, fontWeight: "700", color: "white" },
-
-    // Active banner
     activeBanner: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: isDarkMode ? "rgba(93,184,154,0.15)" : "rgba(79,195,247,0.1)", borderWidth: 1.5, borderColor: colors.primary, borderRadius: 16, padding: 14, marginBottom: 20 },
     activeBannerDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary },
     activeBannerText: { flex: 1, fontSize: 13, fontWeight: "600", color: colors.primary },
     activeBannerStop: { paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "rgba(255,107,107,0.15)", borderRadius: 10 },
-
-    // Section
     taskHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
     sectionLabel: { fontSize: 18, fontWeight: "700", color: colors.textDark },
     addTaskBtn: { padding: 4 },
-
-    // Task card
-    taskCard: { flexDirection: "row", alignItems: "center", backgroundColor: colors.cardBg, borderRadius: 18, borderWidth: 1.5, borderColor: colors.border, marginBottom: 10, overflow: "hidden" },
+    taskCard: { flexDirection: "row", alignItems: "center", backgroundColor: colors.cardBg, borderRadius: 18, borderWidth: 1.5, borderColor: colors.border, overflow: "hidden" },
     taskCardActive: { borderColor: colors.primary, borderWidth: 2, backgroundColor: isDarkMode ? "rgba(93,184,154,0.08)" : "rgba(79,195,247,0.05)" },
     taskCardCompleted: { opacity: 0.55 },
     taskMain: { flex: 1, padding: 16 },
@@ -658,14 +784,16 @@ export default function FocusTracker() {
     activeActions: { flexDirection: "row", gap: 8, paddingVertical: 12, paddingRight: 12 },
     actionBtn: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: isDarkMode ? "rgba(93,184,154,0.2)" : "rgba(79,195,247,0.15)" },
     doneBtn: { backgroundColor: colors.primary },
-
-    // Loading / empty
+    swipeWrapper: { marginBottom: 10, borderRadius: 18, overflow: "hidden" },
+    swipeActions: { flexDirection: "row", overflow: "hidden", borderRadius: 18, marginBottom: 10 },
+    swipeAction: { width: 72, alignItems: "center", justifyContent: "center", gap: 5 },
+    swipeEdit: { backgroundColor: colors.primary },
+    swipeDelete: { backgroundColor: "#FF6B6B" },
+    swipeActionText: { fontSize: 11, fontWeight: "700", color: "#fff", letterSpacing: 0.2 },
     loadingContainer: { paddingVertical: 40, alignItems: "center" },
     emptyContainer: { paddingVertical: 40, alignItems: "center", gap: 8 },
     emptyText: { fontSize: 18, fontWeight: "600", color: colors.textMedium, marginTop: 12 },
     emptySubtext: { fontSize: 14, color: colors.textLight },
-
-    // Sessions
     sessionCard: { backgroundColor: colors.cardBg, borderRadius: 18, borderWidth: 1.5, borderColor: colors.border, padding: 16, marginBottom: 10 },
     sessionRow: { flexDirection: "row", alignItems: "center", gap: 12 },
     sessionIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: isDarkMode ? "rgba(93,184,154,0.15)" : "rgba(79,195,247,0.1)", alignItems: "center", justifyContent: "center" },
@@ -679,8 +807,6 @@ export default function FocusTracker() {
     totalSessionRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: isDarkMode ? "rgba(93,184,154,0.1)" : "rgba(79,195,247,0.08)", borderRadius: 14, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: colors.border },
     totalSessionLabel: { fontSize: 14, fontWeight: "600", color: colors.textMedium },
     totalSessionValue: { fontSize: 18, fontWeight: "800", color: colors.primary },
-
-    // Modals
     modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 },
     addTaskModalContent: { backgroundColor: colors.surface, borderRadius: 30, padding: 24, width: "100%", maxWidth: 400, borderWidth: 2, borderColor: colors.border },
     addTaskHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
@@ -744,7 +870,6 @@ export default function FocusTracker() {
             </TouchableOpacity>
           )}
         </View>
-
         {dailyGoalSeconds > 0 ? (
           <>
             <View style={styles.goalCountdownRow}>
@@ -795,7 +920,6 @@ export default function FocusTracker() {
   return (
     <Background>
       <View style={styles.container}>
-        {/* HEADER */}
         <View style={styles.header}>
           <View style={styles.headerContent}>
             <View style={styles.logoContainer}>
@@ -810,7 +934,6 @@ export default function FocusTracker() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           <Text style={styles.pageTitle}>Daily Focus Tracker</Text>
 
-          {/* STATS BAR */}
           <View style={styles.statsBar}>
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{completedCount}/{totalCount}</Text>
@@ -828,10 +951,8 @@ export default function FocusTracker() {
             </View>
           </View>
 
-          {/* DAILY GOAL COUNTDOWN CARD */}
           {renderGoalCard()}
 
-          {/* ACTIVE TASK BANNER */}
           {activeTask && (
             <View style={styles.activeBanner}>
               <View style={styles.activeBannerDot} />
@@ -844,7 +965,6 @@ export default function FocusTracker() {
             </View>
           )}
 
-          {/* TASKS */}
           <View style={styles.taskHeaderRow}>
             <Text style={styles.sectionLabel}>Today's Goals</Text>
             <TouchableOpacity style={styles.addTaskBtn} onPress={() => setShowAddTaskModal(true)}>
@@ -864,78 +984,88 @@ export default function FocusTracker() {
             </View>
           ) : (
             tasks.map((task) => {
-              const isActive = activeTaskId === task.id;
+              const isActive     = activeTaskId === task.id;
+              const swipeEnabled = !task.completed && !isActive;
               return (
-                <View key={task.id} style={[
-                  styles.taskCard,
-                  task.completed && styles.taskCardCompleted,
-                  isActive && styles.taskCardActive,
-                ]}>
-                  <View style={styles.taskMain}>
-                    <Text style={[styles.taskText, task.completed && styles.taskTextDone]} numberOfLines={2}>
-                      {task.text}
-                    </Text>
-                    {isActive ? (
-                      <View style={styles.activeTimerRow}>
-                        <Text style={styles.elapsedText}>{formatElapsed(elapsedSeconds)}</Text>
-                        {isPaused && (
-                          <View style={styles.pausedPill}>
-                            <Ionicons name="pause" size={10} color="#FF9800" />
-                            <Text style={styles.pausedPillText}>{pauseReason ?? "PAUSED"}</Text>
-                          </View>
-                        )}
+                <Swipeable
+                  key={task.id}
+                  ref={(ref: any) => {
+                    if (ref) swipeableRefs.set(task.id, ref);
+                    else swipeableRefs.delete(task.id);
+                  }}
+                  renderRightActions={() => renderRightActions(task)}
+                  rightThreshold={40}
+                  overshootRight={false}
+                  friction={2}
+                  enabled={swipeEnabled}
+                  containerStyle={styles.swipeWrapper}
+                  onSwipeableOpen={() => closeAllSwipeables(task.id)}
+                >
+                  <View style={[
+                    styles.taskCard,
+                    task.completed && styles.taskCardCompleted,
+                    isActive && styles.taskCardActive,
+                  ]}>
+                    <View style={styles.taskMain}>
+                      <Text style={[styles.taskText, task.completed && styles.taskTextDone]} numberOfLines={2}>
+                        {task.text}
+                      </Text>
+                      {isActive ? (
+                        <View style={styles.activeTimerRow}>
+                          <Text style={styles.elapsedText}>{formatElapsed(elapsedSeconds)}</Text>
+                          {isPaused && (
+                            <View style={styles.pausedPill}>
+                              <Ionicons name="pause" size={10} color="#FF9800" />
+                              <Text style={styles.pausedPillText}>{pauseReason ?? "PAUSED"}</Text>
+                            </View>
+                          )}
+                        </View>
+                      ) : (
+                        <View style={styles.taskMetaRow}>
+                          {task.focus_time > 0 && (
+                            <View style={styles.focusTimeBadge}>
+                              <Ionicons name="time" size={12} color={colors.primary} />
+                              <Text style={styles.focusTimeText}>{formatFocusTime(task.focus_time)}</Text>
+                            </View>
+                          )}
+                          {task.completion_count > 0 && (
+                            <View style={styles.completionBadge}>
+                              <Ionicons name="trophy" size={12} color="#FFB300" />
+                              <Text style={styles.completionText}>×{task.completion_count}</Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
+                    </View>
+
+                    {task.completed ? (
+                      <View style={{ paddingRight: 16 }}>
+                        <Ionicons name="checkmark-circle" size={30} color={colors.primary} />
+                      </View>
+                    ) : isActive ? (
+                      <View style={styles.activeActions}>
+                        <TouchableOpacity style={styles.actionBtn} onPress={isPaused ? handleResume : handlePause}>
+                          <Ionicons name={isPaused ? "play" : "pause"} size={18} color={colors.primary} />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.actionBtn, styles.doneBtn]} onPress={handleCompleteActiveTask}>
+                          <Ionicons name="checkmark" size={18} color="white" />
+                        </TouchableOpacity>
                       </View>
                     ) : (
-                      <View style={styles.taskMetaRow}>
-                        {task.focus_time > 0 && (
-                          <View style={styles.focusTimeBadge}>
-                            <Ionicons name="time" size={12} color={colors.primary} />
-                            <Text style={styles.focusTimeText}>{formatFocusTime(task.focus_time)}</Text>
-                          </View>
-                        )}
-                        {task.completion_count > 0 && (
-                          <View style={styles.completionBadge}>
-                            <Ionicons name="trophy" size={12} color="#FFB300" />
-                            <Text style={styles.completionText}>×{task.completion_count}</Text>
-                          </View>
-                        )}
+                      <View style={{ paddingRight: 12 }}>
+                        <TouchableOpacity style={styles.startBtn} onPress={() => handleStartTask(task.id)}>
+                          <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.startBtnGradient}>
+                            <Ionicons name="play" size={18} color="white" />
+                          </LinearGradient>
+                        </TouchableOpacity>
                       </View>
                     )}
                   </View>
-
-                  {task.completed ? (
-                    <View style={{ paddingRight: 16 }}>
-                      <Ionicons name="checkmark-circle" size={30} color={colors.primary} />
-                    </View>
-                  ) : isActive ? (
-                    <View style={styles.activeActions}>
-                      <TouchableOpacity style={styles.actionBtn} onPress={isPaused ? handleResume : handlePause}>
-                        <Ionicons name={isPaused ? "play" : "pause"} size={18} color={colors.primary} />
-                      </TouchableOpacity>
-                      <TouchableOpacity style={[styles.actionBtn, styles.doneBtn]} onPress={handleCompleteActiveTask}>
-                        <Ionicons name="checkmark" size={18} color="white" />
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <View style={{ paddingRight: 12 }}>
-                      <TouchableOpacity
-                        style={styles.startBtn}
-                        onPress={() => handleStartTask(task.id)}
-                        onLongPress={() => { setSelectedTaskForAction(task.id); setShowActionMenu(true); }}
-                        delayLongPress={500}
-                      >
-                        <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.startBtnGradient}>
-                          <Ionicons name="play" size={18} color="white" />
-                        </LinearGradient>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
+                </Swipeable>
               );
             })
           )}
 
-          {/* TODAY'S SESSIONS */}
           <View style={[styles.taskHeaderRow, { marginTop: 10 }]}>
             <Text style={styles.sectionLabel}>Today's Sessions</Text>
           </View>
@@ -1054,7 +1184,7 @@ export default function FocusTracker() {
           </View>
         </Modal>
 
-        {/* POST-COMPLETION EMOTION MODAL */}
+        {/* EMOTION MODAL */}
         <Modal visible={showEmotionModal} transparent animationType="slide" onRequestClose={() => {}}>
           <View style={styles.modalOverlay}>
             <View style={styles.emotionModalContent}>
@@ -1121,7 +1251,7 @@ export default function FocusTracker() {
           </View>
         </Modal>
 
-        {/* PAUSE REASON MODAL */}
+        {/* PAUSE MODAL */}
         <Modal visible={showPauseModal} transparent animationType="slide" onRequestClose={() => setShowPauseModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.pauseModalContent}>
