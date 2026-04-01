@@ -1,0 +1,13 @@
+{
+  "name": "live-activity-module",
+  "version": "1.0.0",
+  "description": "Live Activity module for FocusFlow",
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "react-native": "*"
+  }
+}

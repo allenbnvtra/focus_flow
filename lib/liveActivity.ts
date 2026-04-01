@@ -1,16 +1,19 @@
-import { NativeModules, Platform } from 'react-native';
+import { Platform } from 'react-native';
+import { requireNativeModule } from 'expo-modules-core';
 
-const { LiveActivityModule } = NativeModules;
+function getLiveActivityModule() {
+  if (Platform.OS !== 'ios') return null;
+  try {
+    return requireNativeModule('LiveActivityModule');
+  } catch {
+    return null;
+  }
+}
 
-/**
- * Start a Live Activity. Call this when the user presses ▶ on a task.
- * Returns the activity ID string, or null on Android/unsupported devices.
- */
-export async function startLiveActivity(
-  taskName: string,
-  elapsedSeconds: number,
-): Promise<string | null> {
-  if (Platform.OS !== 'ios' || !LiveActivityModule) return null;
+const LiveActivityModule = getLiveActivityModule();
+
+export async function startLiveActivity(taskName: string, elapsedSeconds: number): Promise<string | null> {
+  if (!LiveActivityModule) return null;
   try {
     return await LiveActivityModule.startActivity(taskName, elapsedSeconds);
   } catch (e) {
@@ -19,15 +22,8 @@ export async function startLiveActivity(
   }
 }
 
-/**
- * Update the Live Activity. Call this every ~10s and on pause/resume.
- */
-export async function updateLiveActivity(
-  taskName: string,
-  elapsedSeconds: number,
-  isPaused: boolean,
-): Promise<void> {
-  if (Platform.OS !== 'ios' || !LiveActivityModule) return;
+export async function updateLiveActivity(taskName: string, elapsedSeconds: number, isPaused: boolean): Promise<void> {
+  if (!LiveActivityModule) return;
   try {
     await LiveActivityModule.updateActivity(taskName, elapsedSeconds, isPaused);
   } catch (e) {
@@ -35,11 +31,8 @@ export async function updateLiveActivity(
   }
 }
 
-/**
- * Stop and dismiss the Live Activity. Call this when the session ends.
- */
 export async function stopLiveActivity(): Promise<void> {
-  if (Platform.OS !== 'ios' || !LiveActivityModule) return;
+  if (!LiveActivityModule) return;
   try {
     await LiveActivityModule.stopActivity();
   } catch (e) {
