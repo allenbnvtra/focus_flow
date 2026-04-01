@@ -157,7 +157,7 @@ function RootLayoutContent() {
   const [isMaintenance, setIsMaintenance]           = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState('');
   const [maintenanceEta, setMaintenanceEta]         = useState('');
-
+  
   useEffect(() => {
     if (fontsLoaded) SplashScreen.hideAsync();
   }, [fontsLoaded]);
