@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Platform, TextInput, Modal, KeyboardAvoidingView,
-  Alert, ActivityIndicator, AppState
+  Alert, ActivityIndicator, AppState, Linking, Dimensions
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -93,7 +93,10 @@ const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; icon: st
   low:    { label: "Low",    color: "#4CAF50", icon: "leaf" },
 };
 
-const DATE_RANGE = 7; // days before/after today to show in strip
+const DATE_RANGE       = 7;  // days before/after today to show in strip
+const DATE_ITEM_WIDTH  = 52; // matches minWidth in styles.dateItem
+const DATE_ITEM_GAP    = 6;  // matches gap in styles.dateStrip
+const DATE_STRIP_PAD   = 16; // matches paddingHorizontal in styles.dateStrip
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -213,10 +216,24 @@ export default function FocusTracker() {
   const isPausedRef                = useRef<boolean>(false);
   const activeTaskIdRef            = useRef<string | null>(null);
 
+  // Ref to always hold the latest stopCurrentSession (avoids stale closure in deep link handler)
+  const stopCurrentSessionRef = useRef<(save: boolean) => Promise<void>>(async () => {});
+
   // Keep refs in sync
   useEffect(() => { elapsedSecondsRef.current = elapsedSeconds; }, [elapsedSeconds]);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
   useEffect(() => { activeTaskIdRef.current = activeTaskId; }, [activeTaskId]);
+
+  // Scroll date strip so today is centred on mount
+  useEffect(() => {
+    const screenWidth = Dimensions.get("window").width;
+    const itemSlot    = DATE_ITEM_WIDTH + DATE_ITEM_GAP;
+    const todayLeft   = DATE_STRIP_PAD + DATE_RANGE * itemSlot;
+    const scrollX     = todayLeft - screenWidth / 2 + DATE_ITEM_WIDTH / 2;
+    setTimeout(() => {
+      dateStripRef.current?.scrollTo({ x: Math.max(0, scrollX), animated: false });
+    }, 50);
+  }, []);
 
   // ─── Effects ─────────────────────────────────────────────────────────────────
 
@@ -261,6 +278,32 @@ export default function FocusTracker() {
     });
     return () => sub.remove();
   }, [selectedDate]);
+
+  // Deep link handler — Dynamic Island pause/resume/stop buttons
+  useEffect(() => {
+    const handleURL = ({ url }: { url: string }) => {
+      if (url === "focusflow://timer/pause" && activeTaskIdRef.current && !isPausedRef.current) {
+        setElapsedAtPause(elapsedSecondsRef.current);
+        setSessionStartTime(null);
+        setIsPaused(true);
+        setPauseReason("Break");
+        pushUpdatesNow(activeTaskNameRef.current, elapsedSecondsRef.current, true);
+      } else if (url === "focusflow://timer/resume" && activeTaskIdRef.current && isPausedRef.current) {
+        setSessionStartTime(new Date());
+        setIsPaused(false);
+        setPauseReason(null);
+        pushUpdatesNow(activeTaskNameRef.current, elapsedSecondsRef.current, false);
+      } else if (url === "focusflow://timer/stop" && activeTaskIdRef.current) {
+        stopCurrentSessionRef.current(true);
+      }
+    };
+
+    // Handle URL if app was opened from a cold start via the deep link
+    Linking.getInitialURL().then((url) => { if (url) handleURL({ url }); });
+
+    const sub = Linking.addEventListener("url", handleURL);
+    return () => sub.remove();
+  }, []);
 
   // Main 1-second tick
   useEffect(() => {
@@ -730,6 +773,9 @@ export default function FocusTracker() {
     }
     resetTimer();
   };
+
+  // Keep ref in sync so deep link handler always calls the latest version
+  stopCurrentSessionRef.current = stopCurrentSession;
 
   // ─── Task CRUD ────────────────────────────────────────────────────────────
 

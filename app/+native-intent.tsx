@@ -19,6 +19,9 @@ export async function redirectSystemPath({
     'pause': 'pause',
     'resume': 'resume',
     'stop': 'stop',
+    'timer/pause': 'pause',
+    'timer/resume': 'resume',
+    'timer/stop': 'stop',
   };
 
   const action = actionMap[clean];

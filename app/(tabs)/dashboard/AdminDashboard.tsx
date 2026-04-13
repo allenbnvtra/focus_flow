@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, ScrollView, TouchableOpacity,
-  TextInput, Platform, ActivityIndicator, RefreshControl,
+  TextInput, Platform, ActivityIndicator, RefreshControl, Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -64,6 +64,25 @@ interface StudentDetail {
   gameScores: GameScoreEntry[];
 }
 
+type SortOption = 'name' | 'focus' | 'streak' | 'mood' | 'tasks';
+
+interface ActiveFilters {
+  moodAlert:      boolean;
+  activeWeek:     boolean;
+  noActivity:     boolean;
+  streak3:        boolean;
+  streak7:        boolean;
+  tasksDoneToday: boolean;
+  playedToday:    boolean;
+  noMoodLogs:     boolean;
+}
+
+const DEFAULT_FILTERS: ActiveFilters = {
+  moodAlert: false, activeWeek: false, noActivity: false,
+  streak3: false, streak7: false, tasksDoneToday: false,
+  playedToday: false, noMoodLogs: false,
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const pad = (n: number) => n.toString().padStart(2, '0');
@@ -118,7 +137,9 @@ export default function AdminDashboard() {
   const [totalCount, setTotalCount]           = useState(0);
   const currentPageRef                        = useRef(0);
   const [search, setSearch]                   = useState('');
-  const [filterAlerts, setFilterAlerts]       = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [sortBy, setSortBy]                   = useState<SortOption>('name');
+  const [filters, setFilters]                 = useState<ActiveFilters>(DEFAULT_FILTERS);
 
   const [selected, setSelected]               = useState<StudentSummary | null>(null);
   const [detail, setDetail]                   = useState<StudentDetail | null>(null);
@@ -342,12 +363,34 @@ export default function AdminDashboard() {
 
   // ─── Derived ──────────────────────────────────────────────────────────────
 
-  const alertCount = students.filter(s => s.hasMoodAlert).length;
-  const filtered   = students
-    .filter(s => !filterAlerts || s.hasMoodAlert)
+  const alertCount   = students.filter(s => s.hasMoodAlert).length;
+  const activeFilterCount = Object.values(filters).filter(Boolean).length + (sortBy !== 'name' ? 1 : 0);
+
+  const filtered = students
     .filter(s => !search ||
       s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.email.toLowerCase().includes(search.toLowerCase()));
+      s.email.toLowerCase().includes(search.toLowerCase()))
+    .filter(s => !filters.moodAlert      || s.hasMoodAlert)
+    .filter(s => !filters.activeWeek     || s.sessionCount > 0)
+    .filter(s => !filters.noActivity     || (s.sessionCount === 0 && s.weekFocusSecs === 0))
+    .filter(s => !filters.streak3        || s.currentStreak >= 3)
+    .filter(s => !filters.streak7        || s.currentStreak >= 7)
+    .filter(s => !filters.tasksDoneToday || s.todayTasksDone > 0)
+    .filter(s => !filters.playedToday    || s.gamesToday > 0)
+    .filter(s => !filters.noMoodLogs     || s.recentMoods.length === 0)
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'focus':  return b.weekFocusSecs - a.weekFocusSecs;
+        case 'streak': return b.currentStreak - a.currentStreak;
+        case 'mood': {
+          const avgA = a.recentMoods.length ? a.recentMoods.slice(0,3).reduce((s,m) => s + m.mood_value, 0) / Math.min(3, a.recentMoods.length) : 0;
+          const avgB = b.recentMoods.length ? b.recentMoods.slice(0,3).reduce((s,m) => s + m.mood_value, 0) / Math.min(3, b.recentMoods.length) : 0;
+          return avgB - avgA; // highest mood value (worst) first
+        }
+        case 'tasks':  return b.todayTasksDone - a.todayTasksDone;
+        default:       return a.name.localeCompare(b.name);
+      }
+    });
 
   const loadedLabel = students.length < totalCount
     ? `${students.length} of ${totalCount}`
@@ -772,57 +815,129 @@ export default function AdminDashboard() {
     );
   };
 
+  // ─── Filter modal ─────────────────────────────────────────────────────────
+
+  const toggleFilter = (key: keyof ActiveFilters) =>
+    setFilters(prev => ({ ...prev, [key]: !prev[key] }));
+
+  const renderFilterModal = () => {
+    const SORT_OPTIONS: { key: SortOption; label: string; icon: string }[] = [
+      { key: 'name',   label: 'Name (A–Z)',          icon: 'text-outline' },
+      { key: 'focus',  label: 'Focus Time (Most)',    icon: 'timer-outline' },
+      { key: 'streak', label: 'Streak (Highest)',     icon: 'flame-outline' },
+      { key: 'mood',   label: 'Mood (At-risk first)', icon: 'happy-outline' },
+      { key: 'tasks',  label: 'Tasks Done Today',     icon: 'checkmark-circle-outline' },
+    ];
+
+    const FILTER_OPTIONS: { key: keyof ActiveFilters; label: string; icon: string; color?: string }[] = [
+      { key: 'moodAlert',      label: 'Mood Alert',           icon: 'warning-outline',          color: '#FF6B6B' },
+      { key: 'activeWeek',     label: 'Active This Week',     icon: 'pulse-outline' },
+      { key: 'noActivity',     label: 'No Activity This Week',icon: 'moon-outline',             color: '#9E9E9E' },
+      { key: 'streak3',        label: 'Streak ≥ 3 Days',      icon: 'flame-outline',            color: '#FF9800' },
+      { key: 'streak7',        label: 'Streak ≥ 7 Days',      icon: 'flame-outline',            color: '#FF5722' },
+      { key: 'tasksDoneToday', label: 'Completed Tasks Today',icon: 'checkmark-done-outline' },
+      { key: 'playedToday',    label: 'Played Game Today',    icon: 'game-controller-outline',  color: '#FFC107' },
+      { key: 'noMoodLogs',     label: 'No Mood Logs',         icon: 'sad-outline',              color: '#9E9E9E' },
+    ];
+
+    return (
+      <Modal
+        visible={showFilterModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowFilterModal(false)}
+        />
+        <View style={styles.filterSheet}>
+          {/* Handle */}
+          <View style={styles.sheetHandle} />
+
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>Filter & Sort</Text>
+            <TouchableOpacity
+              style={styles.sheetClearBtn}
+              onPress={() => { setFilters(DEFAULT_FILTERS); setSortBy('name'); }}
+            >
+              <Text style={styles.sheetClearText}>Reset</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+            {/* Sort */}
+            <Text style={styles.sheetSectionLabel}>Sort By</Text>
+            <View style={styles.sheetOptionsGrid}>
+              {SORT_OPTIONS.map(opt => (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[styles.sheetOption, sortBy === opt.key && styles.sheetOptionActive]}
+                  onPress={() => setSortBy(opt.key)}
+                >
+                  <Ionicons
+                    name={opt.icon as any}
+                    size={16}
+                    color={sortBy === opt.key ? Colors.white : Colors.primary}
+                  />
+                  <Text style={[styles.sheetOptionText, sortBy === opt.key && styles.sheetOptionTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Filters */}
+            <Text style={[styles.sheetSectionLabel, { marginTop: 20 }]}>Filter By</Text>
+            <View style={styles.sheetOptionsGrid}>
+              {FILTER_OPTIONS.map(opt => {
+                const active = filters[opt.key];
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[styles.sheetOption, active && styles.sheetOptionActive]}
+                    onPress={() => toggleFilter(opt.key)}
+                  >
+                    <Ionicons
+                      name={opt.icon as any}
+                      size={16}
+                      color={active ? Colors.white : (opt.color ?? Colors.primary)}
+                    />
+                    <Text style={[styles.sheetOptionText, active && styles.sheetOptionTextActive]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={{ height: 30 }} />
+          </ScrollView>
+
+          <TouchableOpacity
+            style={styles.sheetApplyBtn}
+            onPress={() => setShowFilterModal(false)}
+          >
+            <Text style={styles.sheetApplyText}>
+              Show {filtered.length} Student{filtered.length !== 1 ? 's' : ''}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+    );
+  };
+
   // ─── Student list ─────────────────────────────────────────────────────────
 
-  const renderListHeader = () => (
-    <View style={styles.listHeaderWrap}>
-      <Text style={styles.pageTitle}>Student Monitor</Text>
-
-      <View style={styles.pillsRow}>
-        <View style={styles.pill}>
-          <Ionicons name="people-outline" size={16} color={Colors.primary} />
-          <Text style={styles.pillText}>{loadedLabel} Students</Text>
-        </View>
-        {alertCount > 0 && (
-          <TouchableOpacity style={[styles.pill, styles.pillAlert, filterAlerts && styles.pillAlertActive]}
-            onPress={() => setFilterAlerts(v => !v)}>
-            <Ionicons name="warning-outline" size={16} color="#FF6B6B" />
-            <Text style={[styles.pillText, { color: '#FF6B6B' }]}>{alertCount} Mood Alerts</Text>
-          </TouchableOpacity>
-        )}
+  const renderListHeader = () => {
+    if (!loading) return null;
+    return (
+      <View style={styles.loaderWrap}>
+        <ActivityIndicator size="large" color={Colors.primary} />
       </View>
-
-      <View style={styles.searchRow}>
-        <View style={styles.searchBox}>
-          <Ionicons name="search-outline" size={17} color={Colors.textLight} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search loaded students..."
-            placeholderTextColor={Colors.textLight}
-            value={search}
-            onChangeText={setSearch}
-          />
-          {!!search && (
-            <TouchableOpacity onPress={() => setSearch('')}>
-              <Ionicons name="close-circle" size={17} color={Colors.textLight} />
-            </TouchableOpacity>
-          )}
-        </View>
-        <TouchableOpacity
-          style={[styles.filterBtn, filterAlerts && styles.filterBtnActive]}
-          onPress={() => setFilterAlerts(v => !v)}
-        >
-          <Ionicons name="alert-circle-outline" size={20} color={filterAlerts ? Colors.white : Colors.textMedium} />
-        </TouchableOpacity>
-      </View>
-
-      {loading && (
-        <View style={styles.loaderWrap}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-        </View>
-      )}
-    </View>
-  );
+    );
+  };
 
   const renderListFooter = () => {
     if (loadingMore) {
@@ -833,7 +948,7 @@ export default function AdminDashboard() {
         </View>
       );
     }
-    if (!hasMore && students.length > 0 && !search && !filterAlerts) {
+    if (!hasMore && students.length > 0 && !search && activeFilterCount === 0) {
       return (
         <View style={styles.footerEnd}>
           <View style={styles.footerEndLine} />
@@ -850,32 +965,90 @@ export default function AdminDashboard() {
     return (
       <View style={styles.emptyWrap}>
         <Ionicons name="people-outline" size={56} color={Colors.textLight} />
-        <Text style={styles.emptyText}>{search || filterAlerts ? 'No matches found' : 'No students yet'}</Text>
+        <Text style={styles.emptyText}>{search || activeFilterCount > 0 ? 'No matches found' : 'No students yet'}</Text>
       </View>
     );
   };
 
   const renderList = () => (
-    <FlatList
-      style={styles.scrollView}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-      data={filtered}
-      keyExtractor={item => item.id}
-      renderItem={renderStudentCard}
-      ListHeaderComponent={renderListHeader}
-      ListFooterComponent={renderListFooter}
-      ListEmptyComponent={renderListEmpty}
-      onEndReached={handleLoadMore}
-      onEndReachedThreshold={0.3}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
-          tintColor={Colors.primary}
-        />
-      }
-    />
+    <View style={{ flex: 1 }}>
+      {/* Static section — never unmounts, so TextInput keeps focus while typing */}
+      <View style={styles.listHeaderWrap}>
+        <Text style={styles.pageTitle}>Student Monitor</Text>
+
+        <View style={styles.pillsRow}>
+          <View style={styles.pill}>
+            <Ionicons name="people-outline" size={16} color={Colors.primary} />
+            <Text style={styles.pillText}>{loadedLabel} Students</Text>
+          </View>
+          {alertCount > 0 && (
+            <TouchableOpacity
+              style={[styles.pill, styles.pillAlert, filters.moodAlert && styles.pillAlertActive]}
+              onPress={() => toggleFilter('moodAlert')}
+            >
+              <Ionicons name="warning-outline" size={16} color="#FF6B6B" />
+              <Text style={[styles.pillText, { color: '#FF6B6B' }]}>{alertCount} Mood Alerts</Text>
+            </TouchableOpacity>
+          )}
+          {activeFilterCount > 0 && (
+            <View style={styles.pillActive}>
+              <Ionicons name="options-outline" size={14} color={Colors.white} />
+              <Text style={styles.pillActiveText}>{activeFilterCount} active</Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.searchRow}>
+          <View style={styles.searchBox}>
+            <Ionicons name="search-outline" size={17} color={Colors.textLight} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search students..."
+              placeholderTextColor={Colors.textLight}
+              value={search}
+              onChangeText={setSearch}
+            />
+            {!!search && (
+              <TouchableOpacity onPress={() => setSearch('')}>
+                <Ionicons name="close-circle" size={17} color={Colors.textLight} />
+              </TouchableOpacity>
+            )}
+          </View>
+          <TouchableOpacity
+            style={[styles.filterBtn, activeFilterCount > 0 && styles.filterBtnActive]}
+            onPress={() => setShowFilterModal(true)}
+          >
+            <Ionicons name="options-outline" size={20} color={activeFilterCount > 0 ? Colors.white : Colors.textMedium} />
+            {activeFilterCount > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <FlatList
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        data={filtered}
+        keyExtractor={item => item.id}
+        renderItem={renderStudentCard}
+        ListHeaderComponent={renderListHeader}
+        ListFooterComponent={renderListFooter}
+        ListEmptyComponent={renderListEmpty}
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.3}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={Colors.primary}
+          />
+        }
+      />
+    </View>
   );
 
   // ─── Main render ──────────────────────────────────────────────────────────
@@ -896,6 +1069,7 @@ export default function AdminDashboard() {
         </View>
 
         {selected ? renderDetail() : renderList()}
+        {renderFilterModal()}
       </View>
     </Background>
   );
@@ -913,7 +1087,7 @@ const styles = StyleSheet.create({
 
   scrollView:     { flex: 1 },
   scrollContent:  { paddingHorizontal: 20, paddingBottom: 100 },
-  listHeaderWrap: { paddingTop: 0 },
+  listHeaderWrap: { paddingTop: 0, paddingHorizontal: 20, paddingBottom: 10 },
   pageTitle:      { fontSize: 28, fontWeight: '800', color: Colors.textDark, marginBottom: 14 },
 
   footerLoader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 20 },
@@ -934,6 +1108,28 @@ const styles = StyleSheet.create({
   searchInput:     { flex: 1, fontSize: 15, color: Colors.textDark },
   filterBtn:       { width: 48, height: 48, borderRadius: 14, backgroundColor: Colors.white, borderWidth: 1, borderColor: '#E8E8E8', alignItems: 'center', justifyContent: 'center' },
   filterBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  filterBadge:     { position: 'absolute', top: -4, right: -4, width: 16, height: 16, borderRadius: 8, backgroundColor: '#FF6B6B', alignItems: 'center', justifyContent: 'center' },
+  filterBadgeText: { fontSize: 9, fontWeight: '800', color: '#fff' },
+
+  pillActive:      { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.primary, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 },
+  pillActiveText:  { fontSize: 12, fontWeight: '700', color: Colors.white },
+
+  // Filter modal
+  modalOverlay:       { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
+  filterSheet:        { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: Colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingBottom: Platform.OS === 'ios' ? 36 : 24, maxHeight: '80%' },
+  sheetHandle:        { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0E0E0', alignSelf: 'center', marginTop: 12, marginBottom: 16 },
+  sheetHeader:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  sheetTitle:         { fontSize: 20, fontWeight: '800', color: Colors.textDark },
+  sheetClearBtn:      { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: '#E8E8E8' },
+  sheetClearText:     { fontSize: 13, fontWeight: '600', color: Colors.textMedium },
+  sheetSectionLabel:  { fontSize: 12, fontWeight: '700', color: Colors.textLight, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 },
+  sheetOptionsGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  sheetOption:        { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20, borderWidth: 1.5, borderColor: '#E8E8E8', backgroundColor: Colors.white },
+  sheetOptionActive:  { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  sheetOptionText:    { fontSize: 13, fontWeight: '600', color: Colors.textMedium },
+  sheetOptionTextActive: { color: Colors.white },
+  sheetApplyBtn:      { marginTop: 16, backgroundColor: Colors.primary, borderRadius: 16, paddingVertical: 16, alignItems: 'center' },
+  sheetApplyText:     { fontSize: 16, fontWeight: '700', color: Colors.white },
 
   loaderWrap: { paddingVertical: 60, alignItems: 'center' },
   emptyWrap:  { paddingVertical: 60, alignItems: 'center', gap: 12 },

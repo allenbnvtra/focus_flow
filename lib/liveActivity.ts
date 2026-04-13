@@ -13,11 +13,16 @@ function getLiveActivityModule() {
 const LiveActivityModule = getLiveActivityModule();
 
 export async function startLiveActivity(taskName: string, elapsedSeconds: number): Promise<string | null> {
-  if (!LiveActivityModule) return null;
+  if (!LiveActivityModule) {
+    console.warn('[LiveActivity] Module not available (non-iOS or module not loaded)');
+    return null;
+  }
   try {
-    return await LiveActivityModule.startActivity(taskName, elapsedSeconds);
-  } catch (e) {
-    console.warn('LiveActivity startActivity failed:', e);
+    const id = await LiveActivityModule.startActivity(taskName, elapsedSeconds);
+    console.log('[LiveActivity] Started successfully, id:', id);
+    return id;
+  } catch (e: any) {
+    console.error('[LiveActivity] startActivity FAILED:', e?.message ?? e);
     return null;
   }
 }
