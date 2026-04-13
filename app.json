@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.focusflow.focusflowapp2026",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "appleTeamId": "587736ZDNK",
       "infoPlist": {
         "NSSupportsLiveActivities": true,
