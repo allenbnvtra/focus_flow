@@ -9,6 +9,7 @@ const UNDONE_TASK_CHANNEL  = 'undone-tasks';
 const STREAK_CHANNEL       = 'streak-reminder';
 const MOOD_CHANNEL         = 'mood-checkin';
 const TIMER_CHANNEL        = 'active-timer';
+const TASK_REMINDER_CHANNEL = 'task-reminders';
 const NOTIF_PERM_KEY       = 'focusflow_notif_permissions';
 
 // Fixed ID — every update cancels+reposts this exact slot
@@ -22,13 +23,19 @@ export const MOOD_AFTERNOON_KEY = 'focusflow_mood_afternoon';
 
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
-    const isLiveTimer = notification.request.identifier === LIVE_TIMER_NOTIF_ID;
+    const id   = notification.request.identifier;
+    const data = notification.request.content.data as any;
+
+    const isLiveTimer    = id === LIVE_TIMER_NOTIF_ID;
+    // Task reminders need full foreground presentation (sound + banner)
+    const isTaskReminder = id.startsWith('task-reminder-') || data?.type === 'task-reminder';
+
     return {
-      shouldShowAlert: !isLiveTimer,   // no banner pop for timer ticks
-      shouldPlaySound: false,
-      shouldSetBadge: false,
+      shouldShowAlert:  !isLiveTimer,        // hide banner for live timer ticks only
+      shouldPlaySound:  isTaskReminder,      // play sound for task reminders
+      shouldSetBadge:   false,
       shouldShowBanner: !isLiveTimer,
-      shouldShowList: true,            // always visible in notification center
+      shouldShowList:   true,
     };
   },
 });
@@ -41,15 +48,37 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 
   const { status } = await Notifications.requestPermissionsAsync({
     ios: {
-      allowAlert: true,
-      allowBadge: true,
-      allowSound: true,
+      allowAlert:          true,
+      allowBadge:          true,
+      allowSound:          true,
       allowCriticalAlerts: false,
     },
+    android: {},
   });
 
   await AsyncStorage.setItem(NOTIF_PERM_KEY, status);
   return status === 'granted';
+}
+
+/**
+ * On Android 12 (API 31–32), exact alarms require a special user-approved
+ * permission (SCHEDULE_EXACT_ALARM) that lives in device settings.
+ * Call this before scheduling task reminders and warn the user if not granted.
+ * On Android 13+ USE_EXACT_ALARM is used instead and auto-granted.
+ * Safe no-op on iOS.
+ */
+export async function requestExactAlarmPermission(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  try {
+    const perms = await Notifications.getPermissionsAsync();
+    // canAskAgain false + not granted = user needs to enable in Settings
+    if (!perms.granted && !perms.canAskAgain) return false;
+
+    const result = await Notifications.requestPermissionsAsync({ android: {} });
+    return result.granted;
+  } catch {
+    return true; // non-fatal — proceed optimistically
+  }
 }
 
 // ─── Create Android channels ──────────────────────────────────────────────────
@@ -76,6 +105,14 @@ export async function setupNotificationChannels() {
     importance: Notifications.AndroidImportance.DEFAULT,
     vibrationPattern: [0, 200],
     lightColor: '#7C4DFF',
+  });
+
+  await Notifications.setNotificationChannelAsync(TASK_REMINDER_CHANNEL, {
+    name: 'Scheduled Task Reminders',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#4A9B7F',
+    sound: 'default',
   });
 
   // LOW importance = silent, no heads-up, no vibration — perfect for a
@@ -203,6 +240,14 @@ export async function clearTimerNotification(): Promise<void> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Returns "YYYY-MM-DD" in the device's LOCAL timezone. */
+function localDateStr(d: Date = new Date()): string {
+  const y  = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const dy = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${dy}`;
+}
+
 function getTodayAt(hour: number, minute = 0): Date {
   const d = new Date();
   d.setHours(hour, minute, 0, 0);
@@ -246,7 +291,7 @@ export async function hasMoodForToday(period: 'morning' | 'afternoon'): Promise<
     const raw   = await AsyncStorage.getItem(key);
     if (!raw) return false;
     const { date } = JSON.parse(raw);
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateStr();
     return date === today;
   } catch {
     return false;
@@ -255,7 +300,7 @@ export async function hasMoodForToday(period: 'morning' | 'afternoon'): Promise<
 
 export async function markMoodLogged(period: 'morning' | 'afternoon') {
   const key   = period === 'morning' ? MOOD_MORNING_KEY : MOOD_AFTERNOON_KEY;
-  const today = new Date().toISOString().split('T')[0];
+  const today = localDateStr();
   await AsyncStorage.setItem(key, JSON.stringify({ date: today }));
 }
 
@@ -430,3 +475,60 @@ export async function scheduleStreakReminder(hasActivityToday: boolean) {
 }
 
 export { TIMER_CHANNEL };
+
+// ─── Scheduled Task Reminder ──────────────────────────────────────────────────
+
+/**
+ * Schedules a local notification to fire at the task's scheduled date + time.
+ * Cancels any previous reminder for the same task first.
+ *
+ * Returns:
+ *   'scheduled' — successfully scheduled
+ *   'past'      — the target time is already in the past; nothing was scheduled
+ *   'error'     — an unexpected error occurred
+ */
+export async function scheduleTaskReminderNotif(
+  taskId: string,
+  taskText: string,
+  taskDate: string,      // "YYYY-MM-DD"
+  scheduledTime: string, // "HH:MM"
+): Promise<'scheduled' | 'past' | 'error'> {
+  try {
+    const [hours, minutes] = scheduledTime.split(':').map(Number);
+    const [year, month, day] = taskDate.split('-').map(Number);
+    const fireTime = new Date(year, month - 1, day, hours, minutes, 0, 0);
+
+    if (fireTime <= new Date()) return 'past';
+
+    const identifier = `task-reminder-${taskId}`;
+    try { await Notifications.cancelScheduledNotificationAsync(identifier); } catch (_) {}
+
+    await Notifications.scheduleNotificationAsync({
+      identifier,
+      content: {
+        title: '⏰ Time to focus!',
+        body:  taskText,
+        sound: 'default',           // must be string, not boolean
+        data:  { type: 'task-reminder', taskId },
+        ...(Platform.OS === 'android' && { channelId: TASK_REMINDER_CHANNEL }),
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: fireTime,
+      },
+    });
+    return 'scheduled';
+  } catch (e) {
+    console.error('Failed to schedule task reminder:', e);
+    return 'error';
+  }
+}
+
+/**
+ * Cancels the scheduled reminder for a given task.
+ */
+export async function cancelTaskReminderNotif(taskId: string): Promise<void> {
+  try {
+    await Notifications.cancelScheduledNotificationAsync(`task-reminder-${taskId}`);
+  } catch (_) {}
+}

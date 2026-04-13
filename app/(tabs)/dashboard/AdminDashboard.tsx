@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, FlatList, ScrollView, TouchableOpacity,
   TextInput, Platform, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -108,9 +108,15 @@ export default function AdminDashboard() {
   const { logout } = useAuth();
   const router = useRouter();
 
+  const PAGE_SIZE = 10;
+
   const [students, setStudents]               = useState<StudentSummary[]>([]);
   const [loading, setLoading]                 = useState(true);
   const [refreshing, setRefreshing]           = useState(false);
+  const [loadingMore, setLoadingMore]         = useState(false);
+  const [hasMore, setHasMore]                 = useState(true);
+  const [totalCount, setTotalCount]           = useState(0);
+  const currentPageRef                        = useRef(0);
   const [search, setSearch]                   = useState('');
   const [filterAlerts, setFilterAlerts]       = useState(false);
 
@@ -119,27 +125,54 @@ export default function AdminDashboard() {
   const [detailLoading, setDetailLoading]     = useState(false);
   const [detailTab, setDetailTab]             = useState<'overview' | 'moods' | 'sessions' | 'reflections' | 'games'>('overview');
 
-  useEffect(() => { fetchStudents(); }, []);
+  useEffect(() => { fetchStudents(0); }, []);
 
-  // ─── Fetch all students (batch) ───────────────────────────────────────────
+  // ─── Paginated student fetch ──────────────────────────────────────────────
+  //
+  // pageNum = 0  →  first load / pull-to-refresh  (replaces list)
+  // pageNum > 0  →  infinite-scroll load          (appends to list)
 
-  const fetchStudents = useCallback(async () => {
+  const fetchStudents = useCallback(async (pageNum: number) => {
+    const isFirstPage = pageNum === 0;
+    if (isFirstPage) {
+      if (refreshing) {
+        // already set externally via RefreshControl
+      } else {
+        setLoading(true);
+      }
+    } else {
+      setLoadingMore(true);
+    }
+
     try {
-      setLoading(true);
+      const from = pageNum * PAGE_SIZE;
+      const to   = from + PAGE_SIZE - 1;
+
+      const { data: profiles, error: pErr, count } = await supabase
+        .from('users')
+        .select('id, name, email', { count: 'exact' })
+        .eq('is_admin', false)
+        .order('name')
+        .range(from, to);
+      if (pErr) throw pErr;
+
+      const total = count ?? 0;
+      if (isFirstPage) setTotalCount(total);
+
+      const ids = (profiles || []).map(p => p.id);
+      if (!ids.length) {
+        if (isFirstPage) setStudents([]);
+        setHasMore(false);
+        return;
+      }
+
+      // More pages exist if we haven't reached the total yet
+      setHasMore(from + ids.length < total);
+
       const dayStart = localDayStart();
       const dayEnd   = localDayEnd();
       const weekAgo  = nDaysAgo(7);
       const today    = getLocalToday();
-
-      const { data: profiles, error: pErr } = await supabase
-        .from('users')
-        .select('id, name, email')
-        .eq('is_admin', false)
-        .order('name');
-      if (pErr) throw pErr;
-
-      const ids = (profiles || []).map(p => p.id);
-      if (!ids.length) { setStudents([]); return; }
 
       const [moodsRes, tasksRes, sessRes, gameRes] = await Promise.all([
         supabase.from('daily_moods')
@@ -160,7 +193,6 @@ export default function AdminDashboard() {
           .gte('completed_at', `${weekAgo}T00:00:00`)
           .order('completed_at', { ascending: false }),
 
-        // Fetch game scores: last 7 days (for daily breakdown) + all-time best
         supabase.from('game_scores')
           .select('user_id, game_name, score, session_date, created_at')
           .in('user_id', ids)
@@ -212,14 +244,32 @@ export default function AdminDashboard() {
         };
       });
 
-      setStudents(summaries);
+      if (isFirstPage) {
+        setStudents(summaries);
+      } else {
+        setStudents(prev => [...prev, ...summaries]);
+      }
+      currentPageRef.current = pageNum;
     } catch (e: any) {
       console.error('Admin fetchStudents:', e);
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setLoadingMore(false);
     }
-  }, []);
+  }, [refreshing]);
+
+  const handleLoadMore = useCallback(() => {
+    if (loadingMore || !hasMore || loading) return;
+    fetchStudents(currentPageRef.current + 1);
+  }, [loadingMore, hasMore, loading, fetchStudents]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    currentPageRef.current = 0;
+    setHasMore(true);
+    fetchStudents(0);
+  }, [fetchStudents]);
 
   // ─── Fetch detail ─────────────────────────────────────────────────────────
 
@@ -298,6 +348,10 @@ export default function AdminDashboard() {
     .filter(s => !search ||
       s.name.toLowerCase().includes(search.toLowerCase()) ||
       s.email.toLowerCase().includes(search.toLowerCase()));
+
+  const loadedLabel = students.length < totalCount
+    ? `${students.length} of ${totalCount}`
+    : `${students.length}`;
 
   // ─── Tab renderers ────────────────────────────────────────────────────────
 
@@ -635,23 +689,99 @@ export default function AdminDashboard() {
     );
   };
 
+  // ─── Student card (extracted for FlatList renderItem) ────────────────────
+
+  const renderStudentCard = ({ item: student }: { item: StudentSummary }) => {
+    const latestMood = student.recentMoods[0];
+    return (
+      <TouchableOpacity
+        style={[styles.studentCard, student.hasMoodAlert && styles.studentCardAlert]}
+        onPress={() => handleSelect(student)}
+        activeOpacity={0.8}
+      >
+        <View style={[styles.cardAccent, {
+          backgroundColor: latestMood ? getMoodColor(latestMood.mood_value) : Colors.textLight,
+        }]} />
+        <View style={styles.cardBody}>
+          <View style={styles.cardTopRow}>
+            <LinearGradient
+              colors={student.hasMoodAlert ? ['#FF6B6B', '#FF8A80'] : [Colors.primary, Colors.primaryDark ?? Colors.primary]}
+              style={styles.avatar}
+            >
+              <Text style={styles.avatarText}>{student.name.charAt(0).toUpperCase()}</Text>
+            </LinearGradient>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <View style={styles.nameRow}>
+                <Text style={styles.studentName} numberOfLines={1}>{student.name}</Text>
+                {student.hasMoodAlert && (
+                  <View style={styles.cardAlertBadge}>
+                    <Ionicons name="warning" size={10} color={Colors.white} />
+                    <Text style={styles.cardAlertBadgeText}>Alert</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.studentEmail} numberOfLines={1}>{student.email}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={Colors.textLight} />
+          </View>
+
+          {student.recentMoods.length > 0 ? (
+            <View style={styles.moodDotsRow}>
+              <Text style={styles.moodDotsLabel}>7-day mood:</Text>
+              {[...student.recentMoods].slice(0,7).reverse().map((m, i) => (
+                <View key={i} style={[styles.moodDot, { backgroundColor: getMoodColor(m.mood_value) }]} />
+              ))}
+              <Text style={styles.moodLatest}>
+                {getMoodEmoji(student.recentMoods[0].mood_value)} {getMoodLabel(student.recentMoods[0].mood_value)}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.noMoodText}>No mood logs yet</Text>
+          )}
+
+          <View style={styles.chipsRow}>
+            <View style={styles.chip}>
+              <Ionicons name="checkmark-circle-outline" size={12} color={Colors.primary} />
+              <Text style={styles.chipText}>{student.todayTasksDone}/{student.todayTasksTotal} tasks today</Text>
+            </View>
+            <View style={styles.chip}>
+              <Ionicons name="timer-outline" size={12} color={Colors.primary} />
+              <Text style={styles.chipText}>{formatSecs(student.weekFocusSecs)} this week</Text>
+            </View>
+            {student.currentStreak > 0 && (
+              <View style={styles.chip}>
+                <Text style={{ fontSize: 11 }}>🔥</Text>
+                <Text style={styles.chipText}>{student.currentStreak}d streak</Text>
+              </View>
+            )}
+            {student.bestGameScore > 0 && (
+              <View style={[styles.chip, styles.chipGame]}>
+                <Ionicons name="trophy-outline" size={12} color="#FFC107" />
+                <Text style={[styles.chipText, { color: '#B8860B' }]}>Best Lvl {student.bestGameScore}</Text>
+              </View>
+            )}
+            {student.gamesToday > 0 && (
+              <View style={[styles.chip, styles.chipGame]}>
+                <Ionicons name="game-controller-outline" size={12} color="#FFC107" />
+                <Text style={[styles.chipText, { color: '#B8860B' }]}>{student.gamesToday} play{student.gamesToday !== 1 ? 's' : ''} today</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   // ─── Student list ─────────────────────────────────────────────────────────
 
-  const renderList = () => (
-    <ScrollView
-      style={styles.scrollView}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchStudents(); }} tintColor={Colors.primary} />
-      }
-    >
+  const renderListHeader = () => (
+    <View style={styles.listHeaderWrap}>
       <Text style={styles.pageTitle}>Student Monitor</Text>
 
       <View style={styles.pillsRow}>
         <View style={styles.pill}>
           <Ionicons name="people-outline" size={16} color={Colors.primary} />
-          <Text style={styles.pillText}>{students.length} Students</Text>
+          <Text style={styles.pillText}>{loadedLabel} Students</Text>
         </View>
         {alertCount > 0 && (
           <TouchableOpacity style={[styles.pill, styles.pillAlert, filterAlerts && styles.pillAlertActive]}
@@ -667,7 +797,7 @@ export default function AdminDashboard() {
           <Ionicons name="search-outline" size={17} color={Colors.textLight} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search students..."
+            placeholder="Search loaded students..."
             placeholderTextColor={Colors.textLight}
             value={search}
             onChangeText={setSearch}
@@ -686,100 +816,66 @@ export default function AdminDashboard() {
         </TouchableOpacity>
       </View>
 
-      {loading ? (
+      {loading && (
         <View style={styles.loaderWrap}>
           <ActivityIndicator size="large" color={Colors.primary} />
         </View>
-      ) : filtered.length === 0 ? (
-        <View style={styles.emptyWrap}>
-          <Ionicons name="people-outline" size={56} color={Colors.textLight} />
-          <Text style={styles.emptyText}>{search || filterAlerts ? 'No matches found' : 'No students yet'}</Text>
-        </View>
-      ) : (
-        filtered.map(student => {
-          const latestMood = student.recentMoods[0];
-          return (
-            <TouchableOpacity
-              key={student.id}
-              style={[styles.studentCard, student.hasMoodAlert && styles.studentCardAlert]}
-              onPress={() => handleSelect(student)}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.cardAccent, {
-                backgroundColor: latestMood ? getMoodColor(latestMood.mood_value) : Colors.textLight,
-              }]} />
-              <View style={styles.cardBody}>
-                <View style={styles.cardTopRow}>
-                  <LinearGradient
-                    colors={student.hasMoodAlert ? ['#FF6B6B', '#FF8A80'] : [Colors.primary, Colors.primaryDark ?? Colors.primary]}
-                    style={styles.avatar}
-                  >
-                    <Text style={styles.avatarText}>{student.name.charAt(0).toUpperCase()}</Text>
-                  </LinearGradient>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <View style={styles.nameRow}>
-                      <Text style={styles.studentName} numberOfLines={1}>{student.name}</Text>
-                      {student.hasMoodAlert && (
-                        <View style={styles.cardAlertBadge}>
-                          <Ionicons name="warning" size={10} color={Colors.white} />
-                          <Text style={styles.cardAlertBadgeText}>Alert</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.studentEmail} numberOfLines={1}>{student.email}</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={Colors.textLight} />
-                </View>
-
-                {student.recentMoods.length > 0 ? (
-                  <View style={styles.moodDotsRow}>
-                    <Text style={styles.moodDotsLabel}>7-day mood:</Text>
-                    {[...student.recentMoods].slice(0,7).reverse().map((m, i) => (
-                      <View key={i} style={[styles.moodDot, { backgroundColor: getMoodColor(m.mood_value) }]} />
-                    ))}
-                    <Text style={styles.moodLatest}>
-                      {getMoodEmoji(student.recentMoods[0].mood_value)} {getMoodLabel(student.recentMoods[0].mood_value)}
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={styles.noMoodText}>No mood logs yet</Text>
-                )}
-
-                <View style={styles.chipsRow}>
-                  <View style={styles.chip}>
-                    <Ionicons name="checkmark-circle-outline" size={12} color={Colors.primary} />
-                    <Text style={styles.chipText}>{student.todayTasksDone}/{student.todayTasksTotal} tasks today</Text>
-                  </View>
-                  <View style={styles.chip}>
-                    <Ionicons name="timer-outline" size={12} color={Colors.primary} />
-                    <Text style={styles.chipText}>{formatSecs(student.weekFocusSecs)} this week</Text>
-                  </View>
-                  {student.currentStreak > 0 && (
-                    <View style={styles.chip}>
-                      <Text style={{ fontSize: 11 }}>🔥</Text>
-                      <Text style={styles.chipText}>{student.currentStreak}d streak</Text>
-                    </View>
-                  )}
-                  {/* Game chips */}
-                  {student.bestGameScore > 0 && (
-                    <View style={[styles.chip, styles.chipGame]}>
-                      <Ionicons name="trophy-outline" size={12} color="#FFC107" />
-                      <Text style={[styles.chipText, { color: '#B8860B' }]}>Best Lvl {student.bestGameScore}</Text>
-                    </View>
-                  )}
-                  {student.gamesToday > 0 && (
-                    <View style={[styles.chip, styles.chipGame]}>
-                      <Ionicons name="game-controller-outline" size={12} color="#FFC107" />
-                      <Text style={[styles.chipText, { color: '#B8860B' }]}>{student.gamesToday} play{student.gamesToday !== 1 ? 's' : ''} today</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            </TouchableOpacity>
-          );
-        })
       )}
-    </ScrollView>
+    </View>
+  );
+
+  const renderListFooter = () => {
+    if (loadingMore) {
+      return (
+        <View style={styles.footerLoader}>
+          <ActivityIndicator size="small" color={Colors.primary} />
+          <Text style={styles.footerLoaderText}>Loading more students…</Text>
+        </View>
+      );
+    }
+    if (!hasMore && students.length > 0 && !search && !filterAlerts) {
+      return (
+        <View style={styles.footerEnd}>
+          <View style={styles.footerEndLine} />
+          <Text style={styles.footerEndText}>All {totalCount} students loaded</Text>
+          <View style={styles.footerEndLine} />
+        </View>
+      );
+    }
+    return <View style={styles.footerSpacer} />;
+  };
+
+  const renderListEmpty = () => {
+    if (loading) return null;
+    return (
+      <View style={styles.emptyWrap}>
+        <Ionicons name="people-outline" size={56} color={Colors.textLight} />
+        <Text style={styles.emptyText}>{search || filterAlerts ? 'No matches found' : 'No students yet'}</Text>
+      </View>
+    );
+  };
+
+  const renderList = () => (
+    <FlatList
+      style={styles.scrollView}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+      data={filtered}
+      keyExtractor={item => item.id}
+      renderItem={renderStudentCard}
+      ListHeaderComponent={renderListHeader}
+      ListFooterComponent={renderListFooter}
+      ListEmptyComponent={renderListEmpty}
+      onEndReached={handleLoadMore}
+      onEndReachedThreshold={0.3}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          tintColor={Colors.primary}
+        />
+      }
+    />
   );
 
   // ─── Main render ──────────────────────────────────────────────────────────
@@ -815,9 +911,17 @@ const styles = StyleSheet.create({
   logoText:   { fontSize: 22, fontWeight: '700', color: Colors.textDark, flex: 1 },
   logoutBtn:  { width: 40, height: 40, borderRadius: 11, backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center' },
 
-  scrollView:    { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
-  pageTitle:     { fontSize: 28, fontWeight: '800', color: Colors.textDark, marginBottom: 14 },
+  scrollView:     { flex: 1 },
+  scrollContent:  { paddingHorizontal: 20, paddingBottom: 100 },
+  listHeaderWrap: { paddingTop: 0 },
+  pageTitle:      { fontSize: 28, fontWeight: '800', color: Colors.textDark, marginBottom: 14 },
+
+  footerLoader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 20 },
+  footerLoaderText: { fontSize: 13, color: Colors.textLight, fontWeight: '500' },
+  footerEnd:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 24, paddingHorizontal: 10 },
+  footerEndLine:    { flex: 1, height: 1, backgroundColor: '#E8E8E8' },
+  footerEndText:    { fontSize: 12, color: Colors.textLight, fontWeight: '500' },
+  footerSpacer:     { height: 20 },
 
   pillsRow:        { flexDirection: 'row', gap: 10, marginBottom: 14, flexWrap: 'wrap' },
   pill:            { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.white, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#E8E8E8' },
